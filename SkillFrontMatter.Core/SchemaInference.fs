@@ -3,8 +3,9 @@ module SkillFrontMatter.Core.SchemaInference
 open System
 open System.IO
 open System.Text
+open System.Collections
 open System.Collections.Generic
-open YamlDotNet.RepresentationModel
+open VYaml.Serialization
 open SkillFrontMatter.Core.Types
 open SkillFrontMatter.Core.FrontMatterTextReader
 
@@ -93,53 +94,43 @@ let toPascalCase (s: string) : string =
     |> String.concat ""
 
 // ---------------------------------------------------------------------------
-// Node → InferredType
+// VYaml deserializes YAML into a tree of native CLR objects:
+//   scalar  → bool / int / int64 / double / string / null
+//   mapping → Dictionary<object, object?>  (implements IDictionary)
+//   sequence → List<object?>               (implements IList)
+// We pattern-match on those CLR types directly.
 // ---------------------------------------------------------------------------
 
-let rec inferNodeType (node: YamlNode) : InferredType =
-    match node with
-    | :? YamlScalarNode as s ->
-        // Quoted scalars are explicitly strings regardless of content
-        match s.Style with
-        | YamlDotNet.Core.ScalarStyle.SingleQuoted
-        | YamlDotNet.Core.ScalarStyle.DoubleQuoted
-        | YamlDotNet.Core.ScalarStyle.Literal
-        | YamlDotNet.Core.ScalarStyle.Folded -> TString
-        | _ ->
-            let v = s.Value
-            let mutable boolVal  = false
-            let mutable intVal   = 0L
-            let mutable floatVal = 0.0
-            if Boolean.TryParse(v, &boolVal) then TBool
-            elif Int64.TryParse(v, &intVal)  then TInt
-            elif Double.TryParse(v, Globalization.NumberStyles.Float,
-                                    Globalization.CultureInfo.InvariantCulture, &floatVal) then TFloat
-            else TString
+let private toYamlKey (k: obj) : YamlKey =
+    match k with
+    | :? string as s -> YamlKey s
+    | other          -> YamlKey (string other)
 
-    | :? YamlSequenceNode as seq ->
-        let items = seq.Children
-        if items.Count = 0 then
-            TList TString   // empty → assume string elements
+let rec inferNodeType (node: obj) : InferredType =
+    match node with
+    | null                     -> TString
+    | :? bool                  -> TBool
+    | :? int | :? int64        -> TInt
+    | :? double | :? single    -> TFloat
+    | :? string                -> TString
+    | :? IDictionary as dict ->
+        let entries =
+            [ for entry in dict ->
+                let entry = entry :?> DictionaryEntry
+                let key    = toYamlKey entry.Key
+                let schema = { Type = inferNodeType entry.Value; PresentInAll = true }
+                key, schema ]
+            |> Map.ofList
+        TMapping entries
+    | :? IList as list ->
+        if list.Count = 0 then
+            TList TString
         else
             let unified =
-                items
-                |> Seq.map inferNodeType
-                |> Seq.reduce mergeTypes
+                [ for x in list -> x ]
+                |> List.map inferNodeType
+                |> List.reduce mergeTypes
             TList unified
-
-    | :? YamlMappingNode as m ->
-        let fields =
-            m.Children
-            |> Seq.map (fun kv ->
-                let key =
-                    match kv.Key with
-                    | :? YamlScalarNode as k -> YamlKey k.Value
-                    | other -> YamlKey(other.ToString())
-                let schema = { Type = inferNodeType kv.Value; PresentInAll = true }
-                key, schema)
-            |> Map.ofSeq
-        TMapping fields
-
     | _ -> TString
 
 // ---------------------------------------------------------------------------
@@ -148,11 +139,10 @@ let rec inferNodeType (node: YamlNode) : InferredType =
 
 /// Given a list of per-file raw field maps, derive the final DiscoveredSchema.
 /// A field is PresentInAll=true only if it appears in every file.
-let inferSchema (fileMaps: Map<YamlKey, YamlNode> list) : DiscoveredSchema =
+let inferSchema (fileMaps: Map<YamlKey, obj> list) : DiscoveredSchema =
     let totalFiles = List.length fileMaps
     if totalFiles = 0 then Map.empty
     else
-        // Fold over all files: accumulate (InferredType, count) per key
         let acc = Dictionary<YamlKey, InferredType * int>()
 
         for fileMap in fileMaps do
@@ -180,9 +170,24 @@ let private openFileSync (path: string) =
     new FileStream(path, FileMode.Open, FileAccess.Read,
                    FileShare.ReadWrite ||| FileShare.Delete, 16 * 1024)
 
-/// Try to parse one file's front matter into a raw Map<YamlKey, YamlNode>.
+/// Parse a YAML text fragment into the raw map. The fragment is expected to be
+/// a top-level mapping; non-mappings or empty input yield Map.empty.
+let parseYamlText (yamlText: string) : Map<YamlKey, obj> =
+    if String.IsNullOrWhiteSpace yamlText then Map.empty
+    else
+        let bytes = Encoding.UTF8.GetBytes yamlText
+        let memory = ReadOnlyMemory<byte>(bytes)
+        match YamlSerializer.Deserialize<obj>(memory) with
+        | :? IDictionary as dict ->
+            [ for entry in dict ->
+                let entry = entry :?> DictionaryEntry
+                toYamlKey entry.Key, entry.Value ]
+            |> Map.ofList
+        | _ -> Map.empty
+
+/// Try to parse one file's front matter into a raw Map<YamlKey, obj>.
 /// Returns None if there is no front matter, or Error on parse/IO failure.
-let tryParseRawFrontMatter (path: string) : Result<Map<YamlKey, YamlNode> option, string> =
+let tryParseRawFrontMatter (path: string) : Result<Map<YamlKey, obj> option, string> =
     try
         use stream = openFileSync path
         use reader = new StreamReader(stream, Encoding.UTF8,
@@ -194,26 +199,8 @@ let tryParseRawFrontMatter (path: string) : Result<Map<YamlKey, YamlNode> option
         | Some yamlReader ->
             use yamlReader = yamlReader
             try
-                let yamlStream = YamlStream()
-                yamlStream.Load(reader :> System.IO.TextReader)
-                let _drain = yamlReader.DrainToEnd()
-
-                if yamlStream.Documents.Count = 0 then
-                    Ok(Some Map.empty)
-                else
-                    match yamlStream.Documents.[0].RootNode with
-                    | :? YamlMappingNode as mapping ->
-                        let fields =
-                            mapping.Children
-                            |> Seq.map (fun kv ->
-                                let key =
-                                    match kv.Key with
-                                    | :? YamlScalarNode as k -> YamlKey k.Value
-                                    | other -> YamlKey(other.ToString())
-                                key, kv.Value)
-                            |> Map.ofSeq
-                        Ok(Some fields)
-                    | _ -> Ok(Some Map.empty)
+                let yamlText = yamlReader.ReadToEnd()
+                Ok(Some(parseYamlText yamlText))
             with ex ->
                 Error $"YAML parse error in '%s{path}': %s{ex.Message}"
     with ex ->
@@ -243,41 +230,23 @@ type YamlValue =
     | YList   of YamlValue list
     | YMap    of Map<YamlKey, YamlValue>
 
-let rec nodeToValue (node: YamlNode) : YamlValue =
+let rec objToValue (node: obj) : YamlValue =
     match node with
-    | :? YamlScalarNode as s ->
-        match s.Style with
-        | YamlDotNet.Core.ScalarStyle.SingleQuoted
-        | YamlDotNet.Core.ScalarStyle.DoubleQuoted
-        | YamlDotNet.Core.ScalarStyle.Literal
-        | YamlDotNet.Core.ScalarStyle.Folded -> YString s.Value
-        | _ ->
-            let v = s.Value
-            let mutable boolVal  = false
-            let mutable intVal   = 0L
-            let mutable floatVal = 0.0
-            if Boolean.TryParse(v, &boolVal)  then YBool boolVal
-            elif Int64.TryParse(v, &intVal)   then YInt (int intVal)
-            elif Double.TryParse(v, Globalization.NumberStyles.Float,
-                                    Globalization.CultureInfo.InvariantCulture, &floatVal) then
-                YFloat floatVal
-            else YString v
-    | :? YamlSequenceNode as seq ->
-        seq.Children |> Seq.map nodeToValue |> Seq.toList |> YList
-    | :? YamlMappingNode as m ->
+    | null                  -> YString ""
+    | :? bool   as b        -> YBool b
+    | :? int    as i        -> YInt i
+    | :? int64  as i        -> YInt (int i)
+    | :? double as d        -> YFloat d
+    | :? single as f        -> YFloat (float f)
+    | :? string as s        -> YString s
+    | :? IDictionary as dict ->
         let entries =
-            m.Children
-            |> Seq.map (fun kv ->
-                let key =
-                    match kv.Key with
-                    | :? YamlScalarNode as k -> YamlKey k.Value
-                    | other -> YamlKey(other.ToString())
-                key, nodeToValue kv.Value)
-            |> Map.ofSeq
+            [ for entry in dict ->
+                let entry = entry :?> DictionaryEntry
+                toYamlKey entry.Key, objToValue entry.Value ]
+            |> Map.ofList
         YMap entries
-    | _ -> YString(node.ToString())
-
-
-
-
-
+    | :? IList as list ->
+        [ for x in list -> objToValue x ]
+        |> YList
+    | other -> YString (string other)

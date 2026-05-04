@@ -4,7 +4,6 @@ open System.IO
 open System.Text
 open System.Threading
 open System.Threading.Channels
-open YamlDotNet.RepresentationModel
 open SkillFrontMatter.Core.Types
 open SkillFrontMatter.Core.SchemaInference
 open SkillFrontMatter.Core.FrontMatterTextReader
@@ -50,32 +49,22 @@ let tryReadOne (filePath: AbsoluteFilePath) : Result<RawSkillData option, ScanEr
         | Some yamlReader ->
             use yamlReader = yamlReader
             try
-                let yamlStream = YamlStream()
-                yamlStream.Load(yamlReader :> System.IO.TextReader)
-                let endReason = yamlReader.DrainToEnd()
+                let yamlText  = yamlReader.ReadToEnd()
+                let endReason = yamlReader.EndReason
 
                 match endReason with
                 | Some ClosedByDelimiter ->
+                    let rawMap = parseYamlText yamlText
                     let fields =
-                        if yamlStream.Documents.Count = 0 then Map.empty
-                        else
-                            match yamlStream.Documents.[0].RootNode with
-                            | :? YamlMappingNode as m ->
-                                m.Children
-                                |> Seq.map (fun kv ->
-                                    let key =
-                                        match kv.Key with
-                                        | :? YamlScalarNode as k -> YamlKey k.Value
-                                        | other -> YamlKey(other.ToString())
-                                    key, nodeToValue kv.Value)
-                                |> Map.ofSeq
-                            | _ -> Map.empty
+                        rawMap
+                        |> Map.toSeq
+                        |> Seq.map (fun (k, v) -> k, objToValue v)
+                        |> Map.ofSeq
                     Ok(Some { Path = filePath; Fields = fields })
                 | _ -> Error(MissingClosingDelimiter filePath)
 
             with ex ->
-                let endReason = yamlReader.DrainToEnd()
-                match endReason with
+                match yamlReader.EndReason with
                 | Some ClosedByDelimiter -> Error(YamlParseFailed(filePath, ex))
                 | _                      -> Error(MissingClosingDelimiter filePath)
 

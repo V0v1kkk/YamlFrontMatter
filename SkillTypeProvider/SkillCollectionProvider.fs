@@ -261,7 +261,7 @@ let private buildSkillDefinition (schema: DiscoveredSchema) : ProvidedTypeDefini
 type SkillCollectionTypeProvider(config: TypeProviderConfig) as this =
     inherit TypeProviderForNamespaces(
         config,
-        assemblyReplacementMap = [("SkillTypeProvider", "SkillTypeProvider")])
+        addDefaultProbingLocation = true)
 
     let ns       = "SkillTypeProvider"
     let thisAsm  = Assembly.GetExecutingAssembly()

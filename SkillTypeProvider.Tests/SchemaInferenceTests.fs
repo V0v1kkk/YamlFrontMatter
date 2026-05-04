@@ -1,26 +1,40 @@
 module SkillTypeProvider.Tests.SchemaInferenceTests
 
+open System
+open System.Collections.Generic
+open System.Globalization
 open Xunit
-open YamlDotNet.RepresentationModel
 open SkillFrontMatter.Core.Types
 open SkillFrontMatter.Core.SchemaInference
 
 // ---------------------------------------------------------------------------
 // Helpers
+//
+// `inferNodeType` now operates on raw CLR objects (the shape VYaml emits
+// from `Deserialize<obj>`). The helpers below construct that shape directly.
+// `scalar` mirrors YAML's plain-scalar coercion (try bool → int → float →
+// otherwise string) so the existing test cases keep their original semantics:
+// `scalar "1"` is treated as int, `scalar "hello"` as string, etc.
 // ---------------------------------------------------------------------------
 
-let private scalar (v: string) = YamlScalarNode(v) :> YamlNode
+let private scalar (v: string) : obj =
+    let mutable b = false
+    let mutable i = 0L
+    let mutable f = 0.0
+    if Boolean.TryParse(v, &b) then box b
+    elif Int64.TryParse(v, &i) then box (int i)
+    elif Double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, &f) then box f
+    else box v
 
-let private seqNode (values: string list) =
-    let s = YamlSequenceNode()
-    values |> List.iter (fun v -> s.Children.Add(YamlScalarNode(v)))
-    s :> YamlNode
+let private seqNode (values: string list) : obj =
+    let list = List<obj>()
+    for v in values do list.Add(scalar v)
+    box list
 
-let private mapNode (pairs: (string * string) list) =
-    let m = YamlMappingNode()
-    pairs |> List.iter (fun (k, v) ->
-        m.Children.Add(YamlScalarNode(k), YamlScalarNode(v)))
-    m :> YamlNode
+let private mapNode (pairs: (string * string) list) : obj =
+    let dict = Dictionary<obj, obj>()
+    for (k, v) in pairs do dict.[box k] <- scalar v
+    box dict
 
 let private key = YamlKey
 
@@ -78,7 +92,7 @@ let ``sequence of integers infers TList TInt`` () =
 
 [<Fact>]
 let ``empty sequence infers TList TString`` () =
-    let s = YamlSequenceNode() :> YamlNode
+    let s = box (List<obj>())
     Assert.Equal(TList TString, inferNodeType s)
 
 [<Fact>]
