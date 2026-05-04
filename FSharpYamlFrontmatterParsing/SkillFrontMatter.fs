@@ -6,6 +6,9 @@ open System
 open System.Collections.Generic
 open System.IO
 open System.Text
+open System.Threading
+open System.Threading.Channels
+open System.Threading.Tasks
 open YamlDotNet.Serialization
 
 type SkillFrontMatter =
@@ -16,6 +19,13 @@ type SkillReadError =
     | MissingClosingDelimiter of path: string
     | YamlParseFailed of path: string * error: exn
     | FileReadFailed of path: string * error: exn
+
+type ScanOptions =
+    { RootDirectory: string
+      Pattern: string
+      Parallelism: int
+      PathQueueCapacity: int
+      ResultQueueCapacity: int }
 
 module SkillFrontMatter =
 
@@ -91,3 +101,54 @@ module SkillFrontMatter =
 
         with ex ->
             Error(FileReadFailed(path, ex))
+
+    let scan (options: ScanOptions) (ct: CancellationToken) : ChannelReader<Result<SkillFrontMatter option, SkillReadError>> =
+
+        let pathChannel = Channel.CreateBounded<string>(options.PathQueueCapacity)
+        let resultChannel = Channel.CreateBounded<Result<SkillFrontMatter option, SkillReadError>>(options.ResultQueueCapacity)
+
+        // Producer: walk the directory tree and push file paths
+        let producer = task {
+            try
+                let files =
+                    Directory.EnumerateFiles(options.RootDirectory, options.Pattern, SearchOption.AllDirectories)
+
+                for file in files do
+                    do! pathChannel.Writer.WriteAsync(file, ct)
+            with ex ->
+                pathChannel.Writer.Complete(ex)
+                return ()
+
+            pathChannel.Writer.Complete()
+        }
+
+        ignore producer // fire-and-forget; channel completion signals consumers
+
+        // Consumer worker: read paths, parse front matter, write results
+        let worker () = task {
+            let deserializer = DeserializerBuilder().Build()
+            let pathReader = pathChannel.Reader
+
+            let mutable keepReading = true
+
+            while keepReading do
+                let! canRead = pathReader.WaitToReadAsync(ct).AsTask()
+
+                if not canRead then
+                    keepReading <- false
+                else
+                    let mutable path = ""
+
+                    while pathReader.TryRead(&path) do
+                        let result = tryReadOne deserializer path
+                        do! resultChannel.Writer.WriteAsync(result, ct)
+        }
+
+        let workers = Array.init options.Parallelism (fun _ -> worker () :> Task)
+
+        Task
+            .WhenAll(workers)
+            .ContinueWith(fun _ -> resultChannel.Writer.Complete())
+        |> ignore
+
+        resultChannel.Reader

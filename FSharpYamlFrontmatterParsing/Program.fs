@@ -2,10 +2,7 @@
 open System
 open System.IO
 open System.Threading
-open System.Threading.Channels
 open FSharpYamlFrontmatterParsing.SkillFrontMatter
-open FSharpYamlFrontmatterParsing.FrontMatterTextReader
-open YamlDotNet.Serialization
 
 let printError error =
     match error with
@@ -30,12 +27,12 @@ let run rootDirectory =
 
         let reader =
             SkillFrontMatter.scan
-                rootDirectory = rootDirectory
-                pattern = "SKILL.md"
-                parallelism = 16
-                pathQueueCapacity = 512
-                resultQueueCapacity = 512
-                ct = cts.Token
+                { RootDirectory = rootDirectory
+                  Pattern = "SKILL.md"
+                  Parallelism = 16
+                  PathQueueCapacity = 512
+                  ResultQueueCapacity = 512 }
+                cts.Token
 
         let mutable parsedCount = 0
         let mutable skippedCount = 0
@@ -61,7 +58,7 @@ let run rootDirectory =
                         printfn "=== %s ===" skill.Path
 
                         for pair in skill.Metadata do
-                            printfn "%s: %O" pair.Key pair.Value
+                            printfn "  %s: %O" pair.Key pair.Value
 
                     | Ok None ->
                         skippedCount <- skippedCount + 1
@@ -82,8 +79,8 @@ let run rootDirectory =
 [<EntryPoint>]
 let main argv =
     match argv with
-    | [| rootDirectory |] when IO.Directory.Exists rootDirectory ->
-        run rootDirectory
+    | [| rootDirectory |] when Directory.Exists rootDirectory ->
+        (run rootDirectory)
             .GetAwaiter()
             .GetResult()
 
