@@ -1,0 +1,16 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "FSharpYamlFrontmatterParsing", "FSharpYamlFrontmatterParsing\FSharpYamlFrontmatterParsing.fsproj", "{038CE7A2-ADEB-485D-86AF-CA10F13FD157}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
