@@ -8,6 +8,7 @@
     <ItemGroup>
         <Compile Include="FrontMatterTextReader.fs" />
         <Compile Include="SkillFrontMatter.fs" />
+        <Compile Include="DomainTypes.fs" />
         <Compile Include="Program.fs"/>
     </ItemGroup>
 
