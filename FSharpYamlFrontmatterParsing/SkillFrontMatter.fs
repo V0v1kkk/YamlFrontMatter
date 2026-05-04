@@ -9,7 +9,7 @@ open System.Text
 open System.Threading
 open System.Threading.Channels
 open System.Threading.Tasks
-open YamlDotNet.Serialization
+open YamlDotNet.RepresentationModel
 
 type SkillFrontMatter =
     { Path: string
@@ -36,20 +36,52 @@ module SkillFrontMatter =
         options.Share <- FileShare.ReadWrite ||| FileShare.Delete
         options.BufferSize <- 16 * 1024
         options.Options <- FileOptions.None
-
         new FileStream(path, options)
 
-    let private toReadOnlyDictionary (value: Dictionary<string, obj> | null) =
-        if isNull (box value) then
+    // Walk the YamlDotNet AST and convert to plain F# objects:
+    //   YamlScalarNode   → string
+    //   YamlMappingNode  → Dictionary<string, obj>
+    //   YamlSequenceNode → ResizeArray<obj>
+    let rec private nodeToObj (node: YamlNode) : obj =
+        match node with
+        | :? YamlScalarNode as s -> box s.Value
+        | :? YamlMappingNode as m ->
+            let dict = Dictionary<string, obj>(m.Children.Count)
+            for kv in m.Children do
+                let key =
+                    match kv.Key with
+                    | :? YamlScalarNode as k -> k.Value
+                    | other -> other.ToString()
+                dict.[key] <- nodeToObj kv.Value
+            box dict
+        | :? YamlSequenceNode as seq ->
+            let list = ResizeArray<obj>(seq.Children.Count)
+            for item in seq.Children do
+                list.Add(nodeToObj item)
+            box list
+        | other -> box (other.ToString())
+
+    let private parseYaml (reader: TextReader) : IReadOnlyDictionary<string, obj> =
+        let stream = YamlStream()
+        stream.Load(reader)
+
+        if stream.Documents.Count = 0 then
             Dictionary<string, obj>() :> IReadOnlyDictionary<string, obj>
         else
-            value :> IReadOnlyDictionary<string, obj>
+            match stream.Documents.[0].RootNode with
+            | :? YamlMappingNode as mapping ->
+                let dict = Dictionary<string, obj>(mapping.Children.Count)
+                for kv in mapping.Children do
+                    let key =
+                        match kv.Key with
+                        | :? YamlScalarNode as k -> k.Value
+                        | other -> other.ToString()
+                    dict.[key] <- nodeToObj kv.Value
+                dict :> IReadOnlyDictionary<string, obj>
+            | _ ->
+                Dictionary<string, obj>() :> IReadOnlyDictionary<string, obj>
 
-    let tryReadOne
-        (deserializer: IDeserializer)
-        (path: string)
-        : Result<SkillFrontMatter option, SkillReadError> =
-
+    let tryReadOne (path: string) : Result<SkillFrontMatter option, SkillReadError> =
         try
             use stream = openSkillFile path
 
@@ -62,42 +94,28 @@ module SkillFrontMatter =
                     leaveOpen = false)
 
             match FrontMatterTextReader.TryCreate(reader) with
-            | None ->
-                Ok None
-
+            | None -> Ok None
             | Some yamlReader ->
                 use yamlReader = yamlReader
 
                 try
-                    let metadata =
-                        deserializer.Deserialize<Dictionary<string, obj>>(yamlReader)
-                        |> toReadOnlyDictionary
-
+                    let metadata = parseYaml yamlReader
                     let endReason = yamlReader.DrainToEnd()
 
                     match endReason with
                     | Some ClosedByDelimiter ->
-                        Ok
-                            (Some
-                                { Path = path
-                                  Metadata = metadata })
-
+                        Ok(Some { Path = path; Metadata = metadata })
                     | Some PhysicalEndOfFile
                     | None ->
                         Error(MissingClosingDelimiter path)
 
                 with ex ->
-                    // Даже если YAML-парсер упал, можно дочитать адаптер,
-                    // чтобы понять: это реально YAML-ошибка или просто нет closing ---.
                     let endReason = yamlReader.DrainToEnd()
 
                     match endReason with
                     | Some PhysicalEndOfFile
-                    | None ->
-                        Error(MissingClosingDelimiter path)
-
-                    | Some ClosedByDelimiter ->
-                        Error(YamlParseFailed(path, ex))
+                    | None -> Error(MissingClosingDelimiter path)
+                    | Some ClosedByDelimiter -> Error(YamlParseFailed(path, ex))
 
         with ex ->
             Error(FileReadFailed(path, ex))
@@ -112,23 +130,19 @@ module SkillFrontMatter =
             try
                 let files =
                     Directory.EnumerateFiles(options.RootDirectory, options.Pattern, SearchOption.AllDirectories)
-
                 for file in files do
                     do! pathChannel.Writer.WriteAsync(file, ct)
             with ex ->
                 pathChannel.Writer.Complete(ex)
                 return ()
-
             pathChannel.Writer.Complete()
         }
 
-        ignore producer // fire-and-forget; channel completion signals consumers
+        ignore producer
 
-        // Consumer worker: read paths, parse front matter, write results
+        // Worker: no shared state — YamlStream is created per call inside tryReadOne
         let worker () = task {
-            let deserializer = DeserializerBuilder().Build()
             let pathReader = pathChannel.Reader
-
             let mutable keepReading = true
 
             while keepReading do
@@ -138,9 +152,8 @@ module SkillFrontMatter =
                     keepReading <- false
                 else
                     let mutable path = ""
-
                     while pathReader.TryRead(&path) do
-                        let result = tryReadOne deserializer path
+                        let result = tryReadOne path
                         do! resultChannel.Writer.WriteAsync(result, ct)
         }
 
