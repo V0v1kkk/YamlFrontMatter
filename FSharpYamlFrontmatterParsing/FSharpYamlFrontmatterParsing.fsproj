@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <OutputType>Exe</OutputType>
@@ -6,14 +6,11 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="FrontMatterTextReader.fs" />
-        <Compile Include="SkillFrontMatter.fs" />
-        <Compile Include="DomainTypes.fs" />
-        <Compile Include="Program.fs"/>
+        <Compile Include="Program.fs" />
     </ItemGroup>
 
     <ItemGroup>
-      <PackageReference Include="YamlDotNet" Version="17.1.0" />
+        <ProjectReference Include="..\SkillFrontMatter.Core\SkillFrontMatter.Core.fsproj" />
     </ItemGroup>
 
 </Project>

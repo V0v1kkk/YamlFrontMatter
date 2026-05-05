@@ -137,11 +137,21 @@ let rec inferNodeType (node: obj) : InferredType =
 // Cross-file schema inference
 // ---------------------------------------------------------------------------
 
-/// Given a list of per-file raw field maps, derive the final DiscoveredSchema.
-/// A field is PresentInAll=true only if it appears in every file.
-let inferSchema (fileMaps: Map<YamlKey, obj> list) : DiscoveredSchema =
+/// Result of running schema discovery: the inferred schema plus the raw
+/// statistics needed to render a frequency-annotated visualization.
+type DiscoveryReport =
+    { Schema:           DiscoveredSchema
+      FilesScanned:     int
+      /// Number of files containing each top-level field. Fields not present
+      /// in any file simply do not appear in the schema (or this map).
+      FieldOccurrences: Map<YamlKey, int> }
+
+/// Given a list of per-file raw field maps, derive the final DiscoveredSchema
+/// together with the per-field occurrence counts and the total file count.
+let inferSchemaWithStats (fileMaps: Map<YamlKey, obj> list) : DiscoveryReport =
     let totalFiles = List.length fileMaps
-    if totalFiles = 0 then Map.empty
+    if totalFiles = 0 then
+        { Schema = Map.empty; FilesScanned = 0; FieldOccurrences = Map.empty }
     else
         let acc = Dictionary<YamlKey, InferredType * int>()
 
@@ -155,12 +165,25 @@ let inferSchema (fileMaps: Map<YamlKey, obj> list) : DiscoveredSchema =
                 | _ ->
                     acc.[key] <- (itype, 1)
 
-        acc
-        |> Seq.map (fun kv ->
-            let key = kv.Key
-            let (itype, count) = kv.Value
-            key, { Type = itype; PresentInAll = (count = totalFiles) })
-        |> Map.ofSeq
+        let schema =
+            acc
+            |> Seq.map (fun kv ->
+                let key = kv.Key
+                let (itype, count) = kv.Value
+                key, { Type = itype; PresentInAll = (count = totalFiles) })
+            |> Map.ofSeq
+
+        let occurrences =
+            acc
+            |> Seq.map (fun kv -> kv.Key, snd kv.Value)
+            |> Map.ofSeq
+
+        { Schema = schema; FilesScanned = totalFiles; FieldOccurrences = occurrences }
+
+/// Given a list of per-file raw field maps, derive the final DiscoveredSchema.
+/// A field is PresentInAll=true only if it appears in every file.
+let inferSchema (fileMaps: Map<YamlKey, obj> list) : DiscoveredSchema =
+    (inferSchemaWithStats fileMaps).Schema
 
 // ---------------------------------------------------------------------------
 // Front matter parsing (sync, for design-time use)
@@ -206,9 +229,10 @@ let tryParseRawFrontMatter (path: string) : Result<Map<YamlKey, obj> option, str
     with ex ->
         Error $"IO error reading '%s{path}': %s{ex.Message}"
 
-/// Scan a directory synchronously, infer the schema from all matching files.
-/// Errors are silently skipped (design-time: we want schema even if a few files are broken).
-let discoverSchema (rootDir: string) (pattern: string) : DiscoveredSchema =
+/// Scan a directory synchronously, infer the schema and per-field statistics
+/// from all matching files. Errors are silently skipped — design-time we want
+/// best-effort schema even if a few files are broken.
+let discoverSchemaWithStats (rootDir: string) (pattern: string) : DiscoveryReport =
     let fileMaps =
         Directory.EnumerateFiles(rootDir, pattern, SearchOption.AllDirectories)
         |> Seq.choose (fun path ->
@@ -216,7 +240,110 @@ let discoverSchema (rootDir: string) (pattern: string) : DiscoveredSchema =
             | Ok(Some m) -> Some m
             | _          -> None)
         |> Seq.toList
-    inferSchema fileMaps
+    inferSchemaWithStats fileMaps
+
+/// Scan a directory synchronously, infer the schema from all matching files.
+/// Errors are silently skipped (design-time: we want schema even if a few files are broken).
+let discoverSchema (rootDir: string) (pattern: string) : DiscoveredSchema =
+    (discoverSchemaWithStats rootDir pattern).Schema
+
+// ---------------------------------------------------------------------------
+// Schema visualization
+//
+// Renders a DiscoveryReport as a valid F# record declaration. Designed so an
+// agent (or human) can read the inferred shape, see how often each top-level
+// field occurs, and write strongly-typed filter code on top of it.
+// ---------------------------------------------------------------------------
+
+/// Render a DiscoveryReport as F# record types annotated with frequency
+/// information. Top-level fields show "present in N/M files"; fields inside
+/// nested mappings show "always" / "sometimes" within their parent record.
+let formatSchema (report: DiscoveryReport) : string =
+    let sb = StringBuilder()
+
+    // Nested TMappings get their own `and`-record. We collect them as we walk
+    // and emit them after the root record. `seen` deduplicates by name.
+    let pending = ResizeArray<string * Map<YamlKey, FieldSchema>>()
+    let seen    = HashSet<string>()
+
+    let rec renderType (parentName: string) (t: InferredType) : string =
+        match t with
+        | TString          -> "string"
+        | TBool            -> "bool"
+        | TInt             -> "int"
+        | TFloat           -> "float"
+        | TList inner      -> renderType parentName inner + " list"
+        | TMapping fields  ->
+            let typeName = parentName + "Data"
+            if seen.Add typeName then
+                pending.Add(typeName, fields)
+            typeName
+
+    let appendField (name: string) (typeStr: string) (annotation: string) =
+        sb.Append("    ")
+          .Append(name.PadRight(16))
+          .Append(": ")
+          .Append(typeStr.PadRight(34))
+          .Append(" // ")
+          .AppendLine(annotation)
+        |> ignore
+
+    let isReservedKey (YamlKey k) = k = "name" || k = "description"
+
+    // --- Root record -------------------------------------------------------
+    sb.AppendLine("type SkillDefinition = {") |> ignore
+    appendField "Path"        "AbsoluteFilePath" "always (synthesised by the scanner)"
+    appendField "Name"        "SkillName"        "required (SKILL.md convention)"
+    appendField "Description" "SkillDescription" "required (SKILL.md convention)"
+
+    let topLevel =
+        report.Schema
+        |> Map.toSeq
+        |> Seq.filter (fun (k, _) -> not (isReservedKey k))
+        |> Seq.sortBy (fun (YamlKey k, _) -> k)
+        |> Seq.toList
+
+    for (yamlKey, schema) in topLevel do
+        let (YamlKey rawKey) = yamlKey
+        let propName = toPascalCase rawKey
+        let inner    = renderType propName schema.Type
+        let typeStr  = inner + " option"
+        let count    = Map.tryFind yamlKey report.FieldOccurrences |> Option.defaultValue 0
+        let annotation = sprintf "present in %d/%d files" count report.FilesScanned
+        appendField propName typeStr annotation
+
+    sb.AppendLine("}") |> ignore
+
+    // --- Nested records ---------------------------------------------------
+    let mutable i = 0
+    while i < pending.Count do
+        let (typeName, fields) = pending.[i]
+        sb.AppendLine() |> ignore
+        sb.Append("and ").Append(typeName).AppendLine(" = {") |> ignore
+
+        let entries =
+            fields
+            |> Map.toSeq
+            |> Seq.sortBy (fun (YamlKey k, _) -> k)
+
+        for (yamlKey, schema) in entries do
+            let (YamlKey rawKey) = yamlKey
+            let propName = toPascalCase rawKey
+            let inner    = renderType propName schema.Type
+            let typeStr  = inner + " option"
+            let annotation =
+                if schema.PresentInAll then "always present in this record"
+                else "optional within this record"
+            appendField propName typeStr annotation
+
+        sb.AppendLine("}") |> ignore
+        i <- i + 1
+
+    if report.FilesScanned = 0 then
+        sb.AppendLine() |> ignore
+        sb.AppendLine("// (no skill files were scanned — schema is the SKILL.md baseline)") |> ignore
+
+    sb.ToString()
 
 // ---------------------------------------------------------------------------
 // Runtime typed value (used by generated property bodies)

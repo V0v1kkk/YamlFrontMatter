@@ -1,94 +1,113 @@
-﻿// For more information see https://aka.ms/fsharp-console-apps
+module FSharpYamlFrontmatterParsing.Program
+
 open System
 open System.IO
 open System.Threading
-open FSharpYamlFrontmatterParsing.SkillFrontMatter
+open SkillFrontMatter.Core.Types
+open SkillFrontMatter.Core.SchemaInference
+open SkillFrontMatter.Core.SkillScanner
 
-let printError error =
-    match error with
+let private printError (err: ScanError) =
+    match err with
     | MissingClosingDelimiter path ->
-        eprintfn "BROKEN FRONT MATTER: %s" path
-
-    | YamlParseFailed(path, ex) ->
-        eprintfn "YAML ERROR: %s" path
+        eprintfn "BROKEN FRONT MATTER: %s" (AbsoluteFilePath.value path)
+    | YamlParseFailed (path, ex) ->
+        eprintfn "YAML ERROR: %s" (AbsoluteFilePath.value path)
+        eprintfn "  %s" ex.Message
+    | FileReadFailed (path, ex) ->
+        eprintfn "FILE ERROR: %s" (AbsoluteFilePath.value path)
         eprintfn "  %s" ex.Message
 
-    | FileReadFailed(path, ex) ->
-        eprintfn "FILE ERROR: %s" path
-        eprintfn "  %s" ex.Message
+let rec private printValue (indent: int) (value: YamlValue) =
+    let pad = String(' ', indent)
+    match value with
+    | YString s -> printfn "%s%s" pad s
+    | YBool b   -> printfn "%s%b" pad b
+    | YInt i    -> printfn "%s%d" pad i
+    | YFloat f  -> printfn "%s%f" pad f
+    | YList items ->
+        for v in items do
+            printf "%s- " pad
+            printValue 0 v
+    | YMap entries ->
+        for kv in entries do
+            let (YamlKey k) = kv.Key
+            printfn "%s%s:" pad k
+            printValue (indent + 2) kv.Value
 
-let run rootDirectory =
-    task {
-        use cts = new CancellationTokenSource()
+/// Default mode: stream skill-by-skill through the lazy scanner and dump
+/// every YAML field. Demonstrates the `ChannelReader`-based pipeline end-to-end.
+let private dumpMetadata (rootDir: string) : int =
+    use cts = new CancellationTokenSource()
+    Console.CancelKeyPress.Add(fun args ->
+        args.Cancel <- true
+        cts.Cancel())
 
-        Console.CancelKeyPress.Add(fun args ->
-            args.Cancel <- true
-            cts.Cancel())
+    let opts =
+        { RootDirectory       = AbsoluteFilePath.createUnsafe rootDir
+          Pattern             = "SKILL.md"
+          Parallelism         = 16
+          PathQueueCapacity   = 512
+          ResultQueueCapacity = 512 }
 
-        let reader =
-            SkillFrontMatter.scan
-                { RootDirectory = rootDirectory
-                  Pattern = "SKILL.md"
-                  Parallelism = 16
-                  PathQueueCapacity = 512
-                  ResultQueueCapacity = 512 }
-                cts.Token
+    let reader = scan opts cts.Token
 
-        let mutable parsedCount = 0
-        let mutable skippedCount = 0
-        let mutable errorCount = 0
+    let mutable parsed   = 0
+    let mutable skipped  = 0
+    let mutable errors   = 0
+    let mutable keepGoing = true
 
-        let mutable keepReading = true
+    while keepGoing do
+        let canRead = reader.WaitToReadAsync(cts.Token).AsTask().GetAwaiter().GetResult()
+        if not canRead then
+            keepGoing <- false
+        else
+            let mutable item = Unchecked.defaultof<Result<RawSkillData option, ScanError>>
+            while reader.TryRead(&item) do
+                match item with
+                | Ok (Some skill) ->
+                    parsed <- parsed + 1
+                    printfn ""
+                    printfn "=== %s ===" (AbsoluteFilePath.value skill.Path)
+                    for kv in skill.Fields do
+                        let (YamlKey k) = kv.Key
+                        printfn "  %s:" k
+                        printValue 4 kv.Value
+                | Ok None ->
+                    skipped <- skipped + 1
+                | Error err ->
+                    errors <- errors + 1
+                    printError err
 
-        while keepReading do
-            let! canRead = reader.WaitToReadAsync(cts.Token).AsTask()
+    printfn ""
+    printfn "Done. Parsed=%d Skipped=%d Errors=%d" parsed skipped errors
+    if errors = 0 then 0 else 2
 
-            if not canRead then
-                keepReading <- false
-            else
-                let mutable item =
-                    Unchecked.defaultof<Result<SkillFrontMatter option, SkillReadError>>
-
-                while reader.TryRead(&item) do
-                    match item with
-                    | Ok(Some skill) ->
-                        parsedCount <- parsedCount + 1
-
-                        printfn ""
-                        printfn "=== %s ===" skill.Path
-
-                        for pair in skill.Metadata do
-                            printfn "  %s: %O" pair.Key pair.Value
-
-                    | Ok None ->
-                        skippedCount <- skippedCount + 1
-
-                    | Error error ->
-                        errorCount <- errorCount + 1
-                        printError error
-
-        printfn ""
-        printfn "Done."
-        printfn "Parsed:  %d" parsedCount
-        printfn "Skipped: %d" skippedCount
-        printfn "Errors:  %d" errorCount
-
-        return if errorCount = 0 then 0 else 2
-    }
+/// Schema mode: synchronously discover the inferred record type for the
+/// directory and print it as F# code annotated with frequency stats.
+/// Use case: an agent runs this once, reads the output, then writes typed
+/// F# code on top of the SkillTypeProvider knowing the exact shape.
+let private dumpSchema (rootDir: string) : int =
+    let report = discoverSchemaWithStats rootDir "SKILL.md"
+    printfn "%s" (formatSchema report)
+    0
 
 [<EntryPoint>]
 let main argv =
     match argv with
-    | [| rootDirectory |] when Directory.Exists rootDirectory ->
-        (run rootDirectory)
-            .GetAwaiter()
-            .GetResult()
+    | [| rootDir |] when Directory.Exists rootDir ->
+        dumpMetadata rootDir
 
-    | [| rootDirectory |] ->
-        eprintfn "Directory does not exist: %s" rootDirectory
+    | [| rootDir; "--schema" |]
+    | [| "--schema"; rootDir |] when Directory.Exists rootDir ->
+        dumpSchema rootDir
+
+    | [| rootDir |] | [| rootDir; _ |] | [| _; rootDir |] ->
+        eprintfn "Directory does not exist: %s" rootDir
         1
 
     | _ ->
         eprintfn "Usage:"
-        eprintfn "  dotnet run -- <skills-root-directory>"
+        eprintfn "  dotnet run -- <skills-root-directory>           # dump every SKILL.md's metadata"
+        eprintfn "  dotnet run -- <skills-root-directory> --schema  # print inferred F# record type"
         1

@@ -77,8 +77,7 @@ let ``rich skill has string optional fields`` () =
 let ``complex skill deserializes bool, int, list, and nested mapping`` () =
     let s =
         Fixtures.GetAll()
-        |> Seq.find (fun s -> s.Name = SkillName.createUnsafe "complex-skill")
-    let c = s.Name
+        |> Seq.find (fun s -> s.Name = SkillName.createUnsafe "complex-skill")  
     Assert.Equal(Some true, s.Active)
     Assert.Equal(Some 42,   s.Priority)
     Assert.Equal(Some ["fsharp"; "dotnet"; "type-providers"], s.Tags)

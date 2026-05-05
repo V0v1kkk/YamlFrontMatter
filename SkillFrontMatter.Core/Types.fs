@@ -3,7 +3,8 @@ module SkillFrontMatter.Core.Types
 open System
 
 [<Struct>]
-type AbsoluteFilePath = private AbsoluteFilePath of string
+type AbsoluteFilePath = private AbsoluteFilePath of string with
+    member this.Value = let (AbsoluteFilePath v) = this in v
 
 module AbsoluteFilePath =
     let value (AbsoluteFilePath v) = v
@@ -15,7 +16,8 @@ module AbsoluteFilePath =
     let createUnsafe (s: string) = AbsoluteFilePath s
 
 [<Struct>]
-type SkillName = private SkillName of string
+type SkillName = private SkillName of string with
+    member this.Value = let (SkillName v) = this in v
 
 module SkillName =
     let value (SkillName v) = v
@@ -27,7 +29,8 @@ module SkillName =
     let createUnsafe (s: string) = SkillName s
 
 [<Struct>]
-type SkillDescription = private SkillDescription of string
+type SkillDescription = private SkillDescription of string with
+    member this.Value = let (SkillDescription v) = this in v
 
 module SkillDescription =
     let value (SkillDescription v) = v
@@ -40,7 +43,8 @@ module SkillDescription =
 
 /// A YAML front matter key (raw string, case-preserved)
 [<Struct>]
-type YamlKey = YamlKey of string
+type YamlKey = YamlKey of string with
+    member this.Value = let (YamlKey v) = this in v
 
 module YamlKey =
     let value (YamlKey v) = v

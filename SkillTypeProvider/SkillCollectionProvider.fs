@@ -279,15 +279,17 @@ type SkillCollectionTypeProvider(config: TypeProviderConfig) as this =
             let rootDir = args.[0] :?> string
             let pattern = args.[1] :?> string
 
-            let schema =
-                if Directory.Exists rootDir then discoverSchema rootDir pattern
-                else Map.empty
+            let report =
+                if Directory.Exists rootDir then
+                    discoverSchemaWithStats rootDir pattern
+                else
+                    { Schema = Map.empty; FilesScanned = 0; FieldOccurrences = Map.empty }
 
             // The instantiated root type — erased to obj
             let root = ProvidedTypeDefinition(thisAsm, ns, typeName, Some typeof<obj>, isErased = true)
 
             // Nested SkillDefinition
-            let skillDef = buildSkillDefinition schema
+            let skillDef = buildSkillDefinition report.Schema
             root.AddMember skillDef
 
             // GetAll() returns seq<SkillDefinition> (provided) — erases to seq<RawSkillData>
@@ -299,6 +301,20 @@ type SkillCollectionTypeProvider(config: TypeProviderConfig) as this =
                     isStatic = true,
                     invokeCode = fun _args ->
                         <@@ RuntimeHelpers.GetAll(rootDir', pattern') @@>))
+
+            // Describe() returns the inferred schema as F# record source — useful
+            // for agents/humans planning typed filter code over the collection.
+            // Computed at design time and embedded as a string literal so the
+            // visualization matches the *exact* schema the types were generated from.
+            let schemaText = formatSchema report
+            let describeMethod =
+                ProvidedMethod("Describe", [], typeof<string>,
+                    isStatic = true,
+                    invokeCode = fun _args -> <@@ schemaText @@>)
+            describeMethod.AddXmlDoc
+                "Returns the inferred SkillDefinition schema as F# record source, \
+                 annotated with how often each top-level field occurs across the scanned files."
+            root.AddMember describeMethod
 
             root)
 
