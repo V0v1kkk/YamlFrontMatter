@@ -109,7 +109,7 @@ let scan (options: ScanOptions) (ct: CancellationToken) :
                     let result = tryReadOne path
                     resultChannel.Writer.WriteAsync(result, ct).AsTask().GetAwaiter().GetResult())
 
-    let workers = Array.init options.Parallelism (fun _ -> worker () :> System.Threading.Tasks.Task)
+    let workers = Array.init options.Parallelism (fun _ -> worker ())
 
     System.Threading.Tasks.Task
         .WhenAll(workers)
