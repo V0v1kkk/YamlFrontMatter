@@ -3,6 +3,7 @@ module FSharpYamlFrontmatterParsing.Program
 open System
 open System.IO
 open System.Threading
+open System.Threading.Tasks
 open SkillFrontMatter.Core.Types
 open SkillFrontMatter.Core.SchemaInference
 open SkillFrontMatter.Core.SkillScanner
@@ -36,52 +37,57 @@ let rec private printValue (indent: int) (value: YamlValue) =
             printValue (indent + 2) kv.Value
 
 /// Default mode: stream skill-by-skill through the lazy scanner and dump
-/// every YAML field. Demonstrates the `ChannelReader`-based pipeline end-to-end.
-let private dumpMetadata (rootDir: string) : int =
-    use cts = new CancellationTokenSource()
-    Console.CancelKeyPress.Add(fun args ->
-        args.Cancel <- true
-        cts.Cancel())
+/// every YAML field. The consumer side is fully async — `let! canRead = ...`
+/// yields the thread back while the parallel parser workers fill the channel,
+/// so the pipeline actually overlaps IO + parsing instead of blocking on each
+/// element.
+let private dumpMetadata (rootDir: string) : Task<int> =
+    task {
+        use cts = new CancellationTokenSource()
+        Console.CancelKeyPress.Add(fun args ->
+            args.Cancel <- true
+            cts.Cancel())
 
-    let opts =
-        { RootDirectory       = AbsoluteFilePath.createUnsafe rootDir
-          Pattern             = "SKILL.md"
-          Parallelism         = 16
-          PathQueueCapacity   = 512
-          ResultQueueCapacity = 512 }
+        let opts =
+            { RootDirectory       = AbsoluteFilePath.createUnsafe rootDir
+              Pattern             = "SKILL.md"
+              Parallelism         = 16
+              PathQueueCapacity   = 512
+              ResultQueueCapacity = 512 }
 
-    let reader = scan opts cts.Token
+        let reader = scan opts cts.Token
 
-    let mutable parsed   = 0
-    let mutable skipped  = 0
-    let mutable errors   = 0
-    let mutable keepGoing = true
+        let mutable parsed   = 0
+        let mutable skipped  = 0
+        let mutable errors   = 0
+        let mutable keepGoing = true
 
-    while keepGoing do
-        let canRead = reader.WaitToReadAsync(cts.Token).AsTask().GetAwaiter().GetResult()
-        if not canRead then
-            keepGoing <- false
-        else
-            let mutable item = Unchecked.defaultof<Result<RawSkillData option, ScanError>>
-            while reader.TryRead(&item) do
-                match item with
-                | Ok (Some skill) ->
-                    parsed <- parsed + 1
-                    printfn ""
-                    printfn "=== %s ===" (AbsoluteFilePath.value skill.Path)
-                    for kv in skill.Fields do
-                        let (YamlKey k) = kv.Key
-                        printfn "  %s:" k
-                        printValue 4 kv.Value
-                | Ok None ->
-                    skipped <- skipped + 1
-                | Error err ->
-                    errors <- errors + 1
-                    printError err
+        while keepGoing do
+            let! canRead = reader.WaitToReadAsync(cts.Token).AsTask()
+            if not canRead then
+                keepGoing <- false
+            else
+                let mutable item = Unchecked.defaultof<Result<RawSkillData option, ScanError>>
+                while reader.TryRead(&item) do
+                    match item with
+                    | Ok (Some skill) ->
+                        parsed <- parsed + 1
+                        printfn ""
+                        printfn "=== %s ===" (AbsoluteFilePath.value skill.Path)
+                        for kv in skill.Fields do
+                            let (YamlKey k) = kv.Key
+                            printfn "  %s:" k
+                            printValue 4 kv.Value
+                    | Ok None ->
+                        skipped <- skipped + 1
+                    | Error err ->
+                        errors <- errors + 1
+                        printError err
 
-    printfn ""
-    printfn "Done. Parsed=%d Skipped=%d Errors=%d" parsed skipped errors
-    if errors = 0 then 0 else 2
+        printfn ""
+        printfn "Done. Parsed=%d Skipped=%d Errors=%d" parsed skipped errors
+        return if errors = 0 then 0 else 2
+    }
 
 /// Schema mode: synchronously discover the inferred record type for the
 /// directory and print it as F# code annotated with frequency stats.
@@ -96,7 +102,8 @@ let private dumpSchema (rootDir: string) : int =
 let main argv =
     match argv with
     | [| rootDir |] when Directory.Exists rootDir ->
-        dumpMetadata rootDir
+        // Block once at the very top — everything inside dumpMetadata is async.
+        (dumpMetadata rootDir).GetAwaiter().GetResult()
 
     | [| rootDir; "--schema" |]
     | [| "--schema"; rootDir |] when Directory.Exists rootDir ->
