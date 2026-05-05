@@ -63,6 +63,13 @@ jobs:
           /p:Version=${{ steps.version.outputs.version }}
           -o artifacts
 
+      - name: Pack dotnet-yamlfm
+        run: >
+          dotnet pack src/dotnet-yamlfm/dotnet-yamlfm.fsproj
+          -c Release
+          /p:Version=${{ steps.version.outputs.version }}
+          -o artifacts
+
       - name: NuGet login (OIDC)
         uses: NuGet/login@v1
         id: nuget-login

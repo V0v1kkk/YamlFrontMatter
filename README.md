@@ -2,6 +2,8 @@
 
 Strongly-typed access to YAML front matter in Markdown files — via an **F# Type Provider** and a standalone parsing library.
 
+The library is **F#-first** — all core types are idiomatic F# (discriminated unions, `Map`, `option`). C# consumers can use it directly via standard .NET interop; see the [C# section](#use-from-c) below.
+
 Point the Type Provider at a directory of Markdown files and get compile-time IntelliSense with property names, types, and nullability inferred automatically from the actual data.
 
 ## Quick start
@@ -63,6 +65,89 @@ let reader = scan scanOptions cancellationToken
 // ... consume ChannelReader<Result<RawSkillData option, ScanError>>
 ```
 
+See `[examples/FSharpExample/](examples/FSharpExample/)` for a complete working demo.
+
+### Use from C#
+
+The core `YamlFrontMatter` library works from C# without any wrappers. F# modules compile as static classes, and types are accessible as nested types within those classes.
+
+```csharp
+using Microsoft.FSharp.Collections;
+using Microsoft.FSharp.Core;
+using YamlFrontMatter;
+using static YamlFrontMatter.Types;
+using static YamlFrontMatter.Scanner;
+using static YamlFrontMatter.SchemaInference;
+```
+
+**Read a single file:**
+
+```csharp
+var path = AbsoluteFilePathModule.createUnsafe("/path/to/SKILL.md");
+var result = Scanner.tryReadOne(path);
+
+if (result.IsOk && FSharpOption<RawSkillData>.get_IsSome(result.ResultValue))
+{
+    var skill = result.ResultValue.Value;
+    Console.WriteLine(skill.Path.Value);
+
+    // Extract typed values via pattern matching on YamlValue DU
+    var nameKey = YamlKey.NewYamlKey("name");
+    var name = MapModule.TryFind(nameKey, skill.Fields);
+    if (FSharpOption<YamlValue>.get_IsSome(name) && name.Value is YamlValue.YString s)
+        Console.WriteLine(s.Item);
+}
+```
+
+**Schema inference:**
+
+```csharp
+var report = SchemaInference.discoverSchemaWithStats("/path/to/skills", "SKILL.md");
+Console.WriteLine($"Scanned {report.FilesScanned} files");
+Console.WriteLine(SchemaInference.formatSchema(report));
+```
+
+**Streaming scanner via Channels:**
+
+```csharp
+var options = new ScanOptions(
+    rootDirectory: AbsoluteFilePathModule.createUnsafe("/path/to/skills"),
+    pattern: "SKILL.md",
+    parallelism: 8,
+    pathQueueCapacity: 256,
+    resultQueueCapacity: 256);
+
+var reader = Scanner.scan(options, CancellationToken.None);
+while (reader.WaitToReadAsync().AsTask().GetAwaiter().GetResult())
+{
+    while (reader.TryRead(out var item))
+    {
+        if (item.IsOk && FSharpOption<RawSkillData>.get_IsSome(item.ResultValue))
+        {
+            var skill = item.ResultValue.Value;
+            // process skill...
+        }
+    }
+}
+```
+
+**C# interop notes:**
+
+
+| F# type                                             | C# access                                                      |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| Module functions (`Scanner.scan`)                   | Static methods on the module class                             |
+| Types in modules (`RawSkillData`)                   | Nested types: `Scanner.RawSkillData`                           |
+| DU cases (`YamlValue.YString`)                      | Subtypes for `is`/`switch`: `value is YamlValue.YString s`     |
+| Single-case DU (`YamlKey`)                          | Factory: `YamlKey.NewYamlKey("x")`, access: `.Value`           |
+| F# `Map<K,V>`                                       | `FSharpMap<K,V>` — use `MapModule.TryFind(key, map)`           |
+| F# `option<T>`                                      | `FSharpOption<T>` — check with `FSharpOption<T>.get_IsSome(x)` |
+| F# `Result<T,E>`                                    | `FSharpResult<T,E>` — check `.IsOk` / `.IsError`               |
+| Companion modules (`AbsoluteFilePath.createUnsafe`) | `AbsoluteFilePathModule.createUnsafe(s)`                       |
+
+
+See `[examples/CSharpExample/](examples/CSharpExample/)` for a complete working demo.
+
 ## How it works
 
 ### Schema inference
@@ -109,9 +194,13 @@ src/
   YamlFrontMatter/                       Core library: types, YAML parser, schema inference, parallel scanner
   YamlFrontMatter.TypeProvider/          Runtime assembly (NuGet package entry point)
   YamlFrontMatter.TypeProvider.DesignTime/  Design-time assembly (provider logic, loaded by F# compiler)
-  dotnet-yamlfm/                         CLI tool for scanning and schema inspection
+  dotnet-yamlfm/                         CLI tool (global dotnet tool) for scanning and schema inspection
 tests/
   YamlFrontMatter.Tests/                 xUnit tests for schema inference and the type provider
+examples/
+  Skills/                                Shared sample SKILL.md fixtures for both examples
+  FSharpExample/                         Idiomatic F# console app using the core library
+  CSharpExample/                         C# console app demonstrating interop with the core library
 ```
 
 ## Supported YAML types
@@ -131,11 +220,26 @@ The `Name` and `Description` fields are treated as **required** and exposed as `
 
 ## CLI tool
 
+Install as a global tool:
+
+```shell
+dotnet tool install -g dotnet-yamlfm
+```
+
+Then use:
+
 ```shell
 # Dump every SKILL.md's parsed metadata (parallel streaming)
-dotnet run --project src/dotnet-yamlfm -- /path/to/skills
+yamlfm /path/to/skills
 
 # Print the inferred F# record type
+yamlfm /path/to/skills --schema
+```
+
+Or run from source:
+
+```shell
+dotnet run --project src/dotnet-yamlfm -- /path/to/skills
 dotnet run --project src/dotnet-yamlfm -- /path/to/skills --schema
 ```
 
@@ -158,7 +262,7 @@ Publishing is done via GitHub Actions (`workflow_dispatch`):
 2. Click **Run workflow**
 3. Optionally provide a version override
 
-The workflow runs tests, packs both `YamlFrontMatter` and `YamlFrontMatter.TypeProvider`, pushes to NuGet via [Trusted Publishing](https://devblogs.microsoft.com/dotnet/enhanced-security-is-here-with-the-new-trust-publishing-on-nuget-org/) (OIDC, no API keys needed), and creates a GitHub Release.
+The workflow runs tests, packs `YamlFrontMatter`, `YamlFrontMatter.TypeProvider`, and `dotnet-yamlfm` (global tool), pushes to NuGet via [Trusted Publishing](https://devblogs.microsoft.com/dotnet/enhanced-security-is-here-with-the-new-trust-publishing-on-nuget-org/) (OIDC, no API keys needed), and creates a GitHub Release.
 
 **One-time setup:**
 
