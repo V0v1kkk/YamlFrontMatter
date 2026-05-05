@@ -37,6 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -73,10 +74,12 @@ jobs:
           /p:Version=${{ steps.version.outputs.version }}
           -o artifacts
 
+      - name: Get NuGet token via Trusted Publishing
+        uses: dotnet/trusted-publishing@v1
+
       - name: Push to NuGet
         run: >
           dotnet nuget push "artifacts/*.nupkg"
-          --api-key ${{ secrets.NUGET_API_KEY }}
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 

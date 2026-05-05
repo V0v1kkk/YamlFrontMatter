@@ -150,11 +150,12 @@ Publishing is done via GitHub Actions (`workflow_dispatch`):
 2. Click **Run workflow**
 3. Optionally provide a version override
 
-The workflow runs tests, packs both `YamlFrontMatter` and `YamlFrontMatter.TypeProvider`, pushes to NuGet, and creates a GitHub Release.
+The workflow runs tests, packs both `YamlFrontMatter` and `YamlFrontMatter.TypeProvider`, pushes to NuGet via [Trusted Publishing](https://devblogs.microsoft.com/dotnet/enhanced-security-is-here-with-the-new-trust-publishing-on-nuget-org/) (OIDC, no API keys needed), and creates a GitHub Release.
 
-**Required GitHub setup:**
-- Add a `NUGET_API_KEY` secret in repository settings (Settings &rarr; Secrets and variables &rarr; Actions)
-  - Get an API key from [nuget.org](https://www.nuget.org/account/apikeys) with push permissions for your packages
+**Required NuGet setup:**
+- On [nuget.org](https://www.nuget.org) &rarr; Manage Packages &rarr; select package &rarr; Trusted Publishers
+- Add GitHub repository `V0v1kkk/YamlFrontMatter`, workflow file `publish.yml`
+- Do this for both `YamlFrontMatter` and `YamlFrontMatter.TypeProvider` packages
 
 ## License
 
