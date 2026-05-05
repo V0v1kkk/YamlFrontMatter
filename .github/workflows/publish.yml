@@ -74,12 +74,16 @@ jobs:
           /p:Version=${{ steps.version.outputs.version }}
           -o artifacts
 
-      - name: Get NuGet token via Trusted Publishing
-        uses: dotnet/trusted-publishing@v1
+      - name: NuGet login (OIDC)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ secrets.NUGET_USER }}
 
       - name: Push to NuGet
         run: >
           dotnet nuget push "artifacts/*.nupkg"
+          --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
