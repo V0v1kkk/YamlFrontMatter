@@ -1,31 +1,27 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <IsPackable>false</IsPackable>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
-    <!-- Copy all transitive deps alongside the TP DLL so the compiler host can load them -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
-  <!-- Compile ProvidedTypes.fs source directly into the TP assembly (no external DLL dep) -->
   <ItemGroup>
     <Compile Include="$(NuGetPackageRoot)/fsharp.typeproviders.sdk/8.10.0/src/ProvidedTypes.fsi" />
     <Compile Include="$(NuGetPackageRoot)/fsharp.typeproviders.sdk/8.10.0/src/ProvidedTypes.fs" />
+    <Compile Include="..\YamlFrontMatter.TypeProvider\RuntimeHelpers.fs" Link="RuntimeHelpers.fs" />
     <Compile Include="SkillCollectionProvider.fs" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="FSharp.TypeProviders.SDK" Version="8.10.0">
-      <!-- We use the source files directly, so exclude the DLL -->
       <ExcludeAssets>compile;runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="VYaml" Version="1.3.0" />
-    <PackageReference Include="System.Threading.Channels" Version="9.0.0" />
-    <PackageReference Include="System.Memory" Version="4.6.3" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SkillFrontMatter.Core\SkillFrontMatter.Core.fsproj" />
+    <ProjectReference Include="..\YamlFrontMatter\YamlFrontMatter.fsproj" />
   </ItemGroup>
 
 </Project>

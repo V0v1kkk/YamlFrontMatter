@@ -1,11 +1,11 @@
-module SkillTypeProvider.Tests.SchemaInferenceTests
+module YamlFrontMatter.Tests.SchemaInferenceTests
 
 open System
 open System.Collections.Generic
 open System.Globalization
 open Xunit
-open SkillFrontMatter.Core.Types
-open SkillFrontMatter.Core.SchemaInference
+open YamlFrontMatter.Types
+open YamlFrontMatter.SchemaInference
 
 // ---------------------------------------------------------------------------
 // Helpers

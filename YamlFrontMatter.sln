@@ -1,0 +1,54 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{A0000000-0000-0000-0000-000000000001}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A0000000-0000-0000-0000-000000000002}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "YamlFrontMatter", "src\YamlFrontMatter\YamlFrontMatter.fsproj", "{FD42B575-8783-4279-A1AF-28CBF7B4EF71}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "YamlFrontMatter.TypeProvider", "src\YamlFrontMatter.TypeProvider\YamlFrontMatter.TypeProvider.fsproj", "{3AEF378E-F4CA-4D58-A833-3E364A42BEF8}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "YamlFrontMatter.TypeProvider.DesignTime", "src\YamlFrontMatter.TypeProvider.DesignTime\YamlFrontMatter.TypeProvider.DesignTime.fsproj", "{B1234567-ABCD-EF01-2345-6789ABCDEF01}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "dotnet-yamlfm", "src\dotnet-yamlfm\dotnet-yamlfm.fsproj", "{038CE7A2-ADEB-485D-86AF-CA10F13FD157}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "YamlFrontMatter.Tests", "tests\YamlFrontMatter.Tests\YamlFrontMatter.Tests.fsproj", "{178725BA-D9EE-4C7F-B02E-F29A1E44D087}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{FD42B575-8783-4279-A1AF-28CBF7B4EF71}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FD42B575-8783-4279-A1AF-28CBF7B4EF71}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FD42B575-8783-4279-A1AF-28CBF7B4EF71}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FD42B575-8783-4279-A1AF-28CBF7B4EF71}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3AEF378E-F4CA-4D58-A833-3E364A42BEF8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3AEF378E-F4CA-4D58-A833-3E364A42BEF8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3AEF378E-F4CA-4D58-A833-3E364A42BEF8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3AEF378E-F4CA-4D58-A833-3E364A42BEF8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B1234567-ABCD-EF01-2345-6789ABCDEF01}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1234567-ABCD-EF01-2345-6789ABCDEF01}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1234567-ABCD-EF01-2345-6789ABCDEF01}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1234567-ABCD-EF01-2345-6789ABCDEF01}.Release|Any CPU.Build.0 = Release|Any CPU
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157}.Release|Any CPU.Build.0 = Release|Any CPU
+		{178725BA-D9EE-4C7F-B02E-F29A1E44D087}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{178725BA-D9EE-4C7F-B02E-F29A1E44D087}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{178725BA-D9EE-4C7F-B02E-F29A1E44D087}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{178725BA-D9EE-4C7F-B02E-F29A1E44D087}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{FD42B575-8783-4279-A1AF-28CBF7B4EF71} = {A0000000-0000-0000-0000-000000000001}
+		{3AEF378E-F4CA-4D58-A833-3E364A42BEF8} = {A0000000-0000-0000-0000-000000000001}
+		{B1234567-ABCD-EF01-2345-6789ABCDEF01} = {A0000000-0000-0000-0000-000000000001}
+		{038CE7A2-ADEB-485D-86AF-CA10F13FD157} = {A0000000-0000-0000-0000-000000000001}
+		{178725BA-D9EE-4C7F-B02E-F29A1E44D087} = {A0000000-0000-0000-0000-000000000002}
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

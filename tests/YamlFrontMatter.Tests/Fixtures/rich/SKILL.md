@@ -9,4 +9,3 @@ origin: https://example.com
 # Rich Skill
 
 This skill has several optional string fields in the front matter.
-

@@ -18,8 +18,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SkillFrontMatter.Core\SkillFrontMatter.Core.fsproj" />
-    <ProjectReference Include="..\SkillTypeProvider\SkillTypeProvider.fsproj" />
+    <ProjectReference Include="..\..\src\YamlFrontMatter\YamlFrontMatter.fsproj" />
+    <ProjectReference Include="..\..\src\YamlFrontMatter.TypeProvider\YamlFrontMatter.TypeProvider.fsproj" />
   </ItemGroup>
 
 </Project>

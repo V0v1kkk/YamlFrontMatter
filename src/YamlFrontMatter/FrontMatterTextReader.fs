@@ -1,4 +1,4 @@
-module SkillFrontMatter.Core.FrontMatterTextReader
+module YamlFrontMatter.FrontMatterTextReader
 
 open System
 open System.IO

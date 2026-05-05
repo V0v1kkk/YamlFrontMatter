@@ -1,12 +1,12 @@
-module SkillFrontMatter.Core.SkillScanner
+module YamlFrontMatter.Scanner
 
 open System.IO
 open System.Text
 open System.Threading
 open System.Threading.Channels
-open SkillFrontMatter.Core.Types
-open SkillFrontMatter.Core.SchemaInference
-open SkillFrontMatter.Core.FrontMatterTextReader
+open YamlFrontMatter.Types
+open YamlFrontMatter.SchemaInference
+open YamlFrontMatter.FrontMatterTextReader
 
 // ---------------------------------------------------------------------------
 // Public types

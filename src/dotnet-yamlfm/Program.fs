@@ -1,12 +1,12 @@
-module FSharpYamlFrontmatterParsing.Program
+module YamlFrontMatter.Cli.Program
 
 open System
 open System.IO
 open System.Threading
 open System.Threading.Tasks
-open SkillFrontMatter.Core.Types
-open SkillFrontMatter.Core.SchemaInference
-open SkillFrontMatter.Core.SkillScanner
+open YamlFrontMatter.Types
+open YamlFrontMatter.SchemaInference
+open YamlFrontMatter.Scanner
 
 let private printError (err: ScanError) =
     match err with

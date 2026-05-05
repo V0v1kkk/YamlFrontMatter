@@ -1,4 +1,4 @@
-module SkillFrontMatter.Core.SchemaInference
+module YamlFrontMatter.SchemaInference
 
 open System
 open System.IO
@@ -6,8 +6,8 @@ open System.Text
 open System.Collections
 open System.Collections.Generic
 open VYaml.Serialization
-open SkillFrontMatter.Core.Types
-open SkillFrontMatter.Core.FrontMatterTextReader
+open YamlFrontMatter.Types
+open YamlFrontMatter.FrontMatterTextReader
 
 // ---------------------------------------------------------------------------
 // Inferred YAML value types

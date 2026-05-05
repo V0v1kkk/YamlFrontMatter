@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <Description>F# Type Provider that gives compile-time typed access to YAML front matter in Markdown files. Scans a directory at design time, infers a cross-file schema, and generates strongly-typed properties.</Description>
+    <PackageTags>fsharp;typeprovider;yaml;frontmatter</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="RuntimeHelpers.fs" />
+    <Compile Include="AssemblyInfo.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\YamlFrontMatter\YamlFrontMatter.fsproj" />
+    <ProjectReference Include="..\YamlFrontMatter.TypeProvider.DesignTime\YamlFrontMatter.TypeProvider.DesignTime.fsproj">
+      <IsFSharpDesignTimeProvider>true</IsFSharpDesignTimeProvider>
+      <PrivateAssets>all</PrivateAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

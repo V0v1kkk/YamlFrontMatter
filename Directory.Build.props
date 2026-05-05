@@ -1,0 +1,13 @@
+<Project>
+
+  <PropertyGroup>
+    <VersionPrefix>0.9</VersionPrefix>
+    <Authors>Vladimir Rogozhin</Authors>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/V0v1kkk/YamlFrontMatter</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/V0v1kkk/YamlFrontMatter.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <Copyright>Copyright (c) 2026 Vladimir Rogozhin</Copyright>
+  </PropertyGroup>
+
+</Project>

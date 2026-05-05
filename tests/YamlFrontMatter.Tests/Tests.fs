@@ -1,9 +1,9 @@
-﻿module SkillTypeProvider.Tests.Tests
+﻿module YamlFrontMatter.Tests.Tests
 
 open System.IO
 open Xunit
-open SkillFrontMatter.Core.Types
-open SkillTypeProvider.SkillCollectionProvider
+open YamlFrontMatter.Types
+open YamlFrontMatter
 
 // ---------------------------------------------------------------------------
 // Instantiate the TP against our fixture directory.
@@ -13,24 +13,24 @@ open SkillTypeProvider.SkillCollectionProvider
 [<Literal>]
 let FixturesDir = __SOURCE_DIRECTORY__ + "/Fixtures"
 
-type Fixtures = SkillTypeProvider.SkillCollectionProvider<FixturesDir>
+type Fixtures = YamlFrontMatter.FrontMatterProvider<FixturesDir>
 
 // ---------------------------------------------------------------------------
 // Compile-time shape tests (type annotations = compile errors if schema is wrong)
 // ---------------------------------------------------------------------------
 
-let _nameIsSkillName        (s: Fixtures.SkillDefinition) : SkillName        = s.Name
-let _descIsSkillDescription (s: Fixtures.SkillDefinition) : SkillDescription  = s.Description
-let _pathIsAbsoluteFilePath (s: Fixtures.SkillDefinition) : AbsoluteFilePath  = s.Path
-let _versionIsStringOpt     (s: Fixtures.SkillDefinition) : string option     = s.Version
-let _triggerIsStringOpt     (s: Fixtures.SkillDefinition) : string option     = s.Trigger
-let _originIsStringOpt      (s: Fixtures.SkillDefinition) : string option     = s.Origin
-let _activeIsBoolOpt        (s: Fixtures.SkillDefinition) : bool option       = s.Active
-let _priorityIsIntOpt       (s: Fixtures.SkillDefinition) : int option        = s.Priority
-let _tagsIsStringListOpt    (s: Fixtures.SkillDefinition) : string list option = s.Tags
-let _metaIsNestedTypeOpt    (s: Fixtures.SkillDefinition) : Fixtures.SkillDefinition.MetadataData option = s.Metadata
-let _metaAuthorIsStringOpt  (m: Fixtures.SkillDefinition.MetadataData) : string option = m.Author
-let _metaRevisionIsIntOpt   (m: Fixtures.SkillDefinition.MetadataData) : int option    = m.Revision
+let _nameIsSkillName        (s: Fixtures.FrontMatterDefinition) : SkillName        = s.Name
+let _descIsSkillDescription (s: Fixtures.FrontMatterDefinition) : SkillDescription  = s.Description
+let _pathIsAbsoluteFilePath (s: Fixtures.FrontMatterDefinition) : AbsoluteFilePath  = s.Path
+let _versionIsStringOpt     (s: Fixtures.FrontMatterDefinition) : string option     = s.Version
+let _triggerIsStringOpt     (s: Fixtures.FrontMatterDefinition) : string option     = s.Trigger
+let _originIsStringOpt      (s: Fixtures.FrontMatterDefinition) : string option     = s.Origin
+let _activeIsBoolOpt        (s: Fixtures.FrontMatterDefinition) : bool option       = s.Active
+let _priorityIsIntOpt       (s: Fixtures.FrontMatterDefinition) : int option        = s.Priority
+let _tagsIsStringListOpt    (s: Fixtures.FrontMatterDefinition) : string list option = s.Tags
+let _metaIsNestedTypeOpt    (s: Fixtures.FrontMatterDefinition) : Fixtures.FrontMatterDefinition.MetadataData option = s.Metadata
+let _metaAuthorIsStringOpt  (m: Fixtures.FrontMatterDefinition.MetadataData) : string option = m.Author
+let _metaRevisionIsIntOpt   (m: Fixtures.FrontMatterDefinition.MetadataData) : int option    = m.Revision
 
 // ---------------------------------------------------------------------------
 // Runtime tests
@@ -91,11 +91,13 @@ let ``Name is a SkillName not a string`` () =
     // If this line compiles, the type is correct.
     // If Name were string, the assignment to SkillName would fail.
     let _: SkillName =
-        Fixtures.GetAll() |> Seq.head |> fun s -> s.Name
+        Fixtures.GetAll() |> Seq.head |> _.Name
+
     Assert.True(true)
 
 [<Fact>]
 let ``Description is a SkillDescription not a string`` () =
     let _: SkillDescription =
-        Fixtures.GetAll() |> Seq.head |> fun s -> s.Description
+        Fixtures.GetAll() |> Seq.head |> _.Description
+
     Assert.True(true)

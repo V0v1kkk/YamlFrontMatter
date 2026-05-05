@@ -1,5 +1,12 @@
 bin/
 obj/
 /packages/
+artifacts/
+TestResults/
+
+# IDE
+.idea/
 riderModule.iml
 /_ReSharper.Caches/
+*.DotSettings.user
+.vs/

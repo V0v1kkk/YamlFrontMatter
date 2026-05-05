@@ -1,4 +1,4 @@
-module SkillFrontMatter.Core.Types
+module YamlFrontMatter.Types
 
 open System
 
