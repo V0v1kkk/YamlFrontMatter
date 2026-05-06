@@ -3,6 +3,10 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <!-- Place the design-time component under typeproviders/fsharp41/<tfm>/
+         (the modern F# compiler/FSI probing path). The SDK default of
+         tools/fsharp41/<tfm>/ is legacy and is NOT picked up by .NET 6+ FSI. -->
+    <FSharpToolsDirectory>typeproviders</FSharpToolsDirectory>
     <Description>F# Type Provider that gives compile-time typed access to YAML front matter in Markdown files. Scans a directory at design time, infers a cross-file schema, and generates strongly-typed properties.</Description>
     <PackageTags>fsharp;typeprovider;yaml;frontmatter</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
