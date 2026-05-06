@@ -270,6 +270,17 @@ The workflow runs tests, packs `YamlFrontMatter`, `YamlFrontMatter.TypeProvider`
   - Repository owner: `V0v1kkk`, Repository: `YamlFrontMatter`, Workflow: `publish.yml`
 2. In GitHub repository secrets, add `NUGET_USER` with your nuget.org profile name
 
+## Contributing
+
+See [AGENTS.md](AGENTS.md) for repository structure, conventions, and contribution guidance — written for both AI coding assistants and human contributors.
+
+This repo also bundles two custom **AI-agent skills** under [`.skills/`](.skills/):
+
+- [`.skills/fsharp-style/`](.skills/fsharp-style/) — F# coding-style guide capturing the conventions this codebase follows (single-case DU shape, active patterns, computation expressions, anti-patterns).
+- [`.skills/fsharp-type-provider/`](.skills/fsharp-type-provider/) — comprehensive F# Type Provider authoring guide: project layout, erased vs generative, packaging, debugging, common pitfalls. Includes deeper reference material under `references/`.
+
+These skills are versioned with the source so any AI assistant that clones the repo (Claude Code, OpenAI Codex, etc.) gets the same opinionated guidance the maintainer's agent uses.
+
 ## License
 
 [MIT](LICENSE)

@@ -1,5 +1,18 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{C0000000-0000-0000-0000-000000000001}"
+	ProjectSection(SolutionItems) = preProject
+		AGENTS.md = AGENTS.md
+		README.md = README.md
+		LICENSE = LICENSE
+		Directory.Build.props = Directory.Build.props
+		.gitignore = .gitignore
+		.github\workflows\ci.yml = .github\workflows\ci.yml
+		.github\workflows\publish.yml = .github\workflows\publish.yml
+		.skills\fsharp-style\SKILL.md = .skills\fsharp-style\SKILL.md
+		.skills\fsharp-type-provider\SKILL.md = .skills\fsharp-type-provider\SKILL.md
+	EndProjectSection
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{A0000000-0000-0000-0000-000000000001}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A0000000-0000-0000-0000-000000000002}"
@@ -19,13 +32,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CSharpExample", "examples\CSharpExample\CSharpExample.csproj", "{76E26AEF-F0D3-4389-9A9E-96719BAFA84C}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "FSharpExample", "examples\FSharpExample\FSharpExample.fsproj", "{B169FBB7-F1ED-4754-84C0-6D4B79A885AE}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "TestData", "TestData", "{71FF4E0A-4476-4659-BA7D-4116FB70CF8F}"
-	ProjectSection(SolutionItems) = preProject
-		tests\YamlFrontMatter.Tests\Fixtures\minimal\SKILL.md = tests\YamlFrontMatter.Tests\Fixtures\minimal\SKILL.md
-		tests\YamlFrontMatter.Tests\Fixtures\rich\SKILL.md = tests\YamlFrontMatter.Tests\Fixtures\rich\SKILL.md
-		tests\YamlFrontMatter.Tests\Fixtures\complex\SKILL.md = tests\YamlFrontMatter.Tests\Fixtures\complex\SKILL.md
-	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -133,6 +139,5 @@ Global
 		{178725BA-D9EE-4C7F-B02E-F29A1E44D087} = {A0000000-0000-0000-0000-000000000002}
 		{76E26AEF-F0D3-4389-9A9E-96719BAFA84C} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 		{B169FBB7-F1ED-4754-84C0-6D4B79A885AE} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
-		{71FF4E0A-4476-4659-BA7D-4116FB70CF8F} = {A0000000-0000-0000-0000-000000000002}
 	EndGlobalSection
 EndGlobal
