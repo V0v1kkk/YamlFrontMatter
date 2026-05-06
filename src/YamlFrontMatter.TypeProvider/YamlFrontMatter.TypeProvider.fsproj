@@ -29,4 +29,27 @@
     </ProjectReference>
   </ItemGroup>
 
+  <!--
+    Explicitly bundle the design-time component (TPDTC) and all its runtime
+    deps into typeproviders/fsharp41/<tfm>/. This deliberately bypasses the
+    SDK's CollectFSharpDesignTimeTools auto-collector, which has produced
+    stub-only packages on GitHub Actions runners (0.9.1–0.9.5 all shipped
+    27 KB nupkgs missing the design-time DLL).
+    Wired as an AfterTargets="Build" target so the DesignTime project is
+    guaranteed to be built before its bin/ is glob-included.
+  -->
+  <Target Name="CollectDesignTimeFiles" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\YamlFrontMatter.TypeProvider.DesignTime\YamlFrontMatter.TypeProvider.DesignTime.fsproj"
+             Targets="Build"
+             Properties="Configuration=$(Configuration);TargetFramework=$(TargetFramework)" />
+    <ItemGroup>
+      <!-- Top-level DLLs only — skip locale satellite folders (cs/, de/, ...). -->
+      <_DesignTimeOutput Include="..\YamlFrontMatter.TypeProvider.DesignTime\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                         Exclude="..\YamlFrontMatter.TypeProvider.DesignTime\bin\$(Configuration)\$(TargetFramework)\FSharp.Core.dll" />
+      <None Include="@(_DesignTimeOutput)"
+            Pack="true"
+            PackagePath="typeproviders/fsharp41/$(TargetFramework)/" />
+    </ItemGroup>
+  </Target>
+
 </Project>
