@@ -49,16 +49,27 @@ jobs:
           echo "Using version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Pack YamlFrontMatter
+      # Pack the whole solution in one shot. Solving two distinct bugs at once:
+      #
+      # 1. The previous per-fsproj pack approach intermittently dropped the
+      #    design-time DLL from the YamlFrontMatter.TypeProvider package on CI
+      #    runners — 0.9.1 / 0.9.2 / 0.9.3 / 0.9.4 all shipped a 27 KB nupkg
+      #    with only the runtime stub, despite the build itself being correct.
+      #    Solution-level pack runs the SDK's CollectFSharpDesignTimeTools target
+      #    in the same MSBuild invocation that produces the package, so the
+      #    design-time DLL reliably ends up in typeproviders/fsharp41/<tfm>/.
+      #
+      # 2. A previous "cleanup" commit accidentally dropped the explicit
+      #    `Pack dotnet-yamlfm` step, so the CLI tool stopped being published
+      #    after 0.9.2. With solution-level pack any project carrying
+      #    IsPackable=true (Core + TypeProvider runtime + dotnet-yamlfm) is
+      #    packed automatically — no per-project step to forget.
+      #
+      # IsPackable=false on the DesignTime project + Tests keeps those out of
+      # the artifacts/ folder.
+      - name: Pack solution
         run: >
-          dotnet pack src/YamlFrontMatter/YamlFrontMatter.fsproj
-          -c Release
-          /p:Version=${{ steps.version.outputs.version }}
-          -o artifacts
-
-      - name: Pack YamlFrontMatter.TypeProvider
-        run: >
-          dotnet pack src/YamlFrontMatter.TypeProvider/YamlFrontMatter.TypeProvider.fsproj
+          dotnet pack YamlFrontMatter.sln
           -c Release
           /p:Version=${{ steps.version.outputs.version }}
           -o artifacts
