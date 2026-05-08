@@ -185,15 +185,16 @@ For everything deeper (erased vs generative, `args.[i]` semantics, debugging ins
 - `dotnet restore` / `dotnet build -c Release` / `dotnet test -c Release`
 - Uploads `.trx` test results as an artifact
 
-[.github/workflows/publish.yml](.github/workflows/publish.yml) — manual `workflow_dispatch` only:
+[.github/workflows/publish.yml](.github/workflows/publish.yml) — runs on every push to `main` **and** on manual `workflow_dispatch`:
 - Re-runs tests
 - Packs `YamlFrontMatter`, `YamlFrontMatter.TypeProvider`, `dotnet-yamlfm`
 - Pushes to nuget.org via [Trusted Publishing](https://devblogs.microsoft.com/dotnet/enhanced-security-is-here-with-the-new-trust-publishing-on-nuget-org/) (OIDC, no API key)
 - Creates a GitHub Release
+- Manual dispatch accepts an optional `versionOverride` input
 
 **Versioning:** `VersionPrefix` (major.minor) is fixed in [Directory.Build.props](Directory.Build.props); the patch is the GitHub Actions run number. Don't bump versions inside `.fsproj` files.
 
-**For agents preparing a release:** run tests locally first, then trigger `publish.yml` from the Actions tab. Don't push to NuGet from a developer machine — the workflow's OIDC trust scope is the only authorized publisher.
+**Continuous delivery:** every push to `main` automatically publishes a new version. Manual `workflow_dispatch` is still available for ad-hoc releases with a version override. Don't push to NuGet from a developer machine — the workflow's OIDC trust scope is the only authorized publisher.
 
 ---
 
