@@ -258,7 +258,20 @@ let discoverSchema (rootDir: string) (pattern: string) : DiscoveredSchema =
 /// Render a DiscoveryReport as F# record types annotated with frequency
 /// information. Top-level fields show "present in N/M files"; fields inside
 /// nested mappings show "always" / "sometimes" within their parent record.
-let formatSchema (report: DiscoveryReport) : string =
+///
+/// `isSkillMode` controls how `name` / `description` are rendered:
+///   * true  — emitted as typed required properties (`Name : SkillName`,
+///             `Description : SkillDescription`) and skipped in the regular
+///             field loop. Matches what the type provider exposes when
+///             `Mode = "skill"`.
+///   * false — treated as ordinary discovered fields (`Name : string option`)
+///             that appear in the normal loop alongside everyone else.
+///             Matches `Mode = "general"` and any custom Required schema.
+///
+/// Padding is computed dynamically from the longest property name in the
+/// record so long names like `RequiresEnvironmentVariables` don't break
+/// alignment.
+let private formatSchemaCore (isSkillMode: bool) (report: DiscoveryReport) : string =
     let sb = StringBuilder()
 
     // Nested TMappings get their own `and`-record. We collect them as we walk
@@ -279,38 +292,57 @@ let formatSchema (report: DiscoveryReport) : string =
                 pending.Add(typeName, fields)
             typeName
 
-    let appendField (name: string) (typeStr: string) (annotation: string) =
+    let isSkillSpecialKey (YamlKey k) = isSkillMode && (k = "name" || k = "description")
+
+    // Compute the padding once per record from the longest property name in
+    // that record, so long names (e.g. `RequiresEnvironmentVariables`) don't
+    // glue the colon to the name. Minimum 16 to keep short records readable.
+    let computeNamePadding (recordHasSkillSpecials: bool) (fields: seq<YamlKey * 'a>) : int =
+        let candidates =
+            seq {
+                yield "Path".Length
+                if recordHasSkillSpecials then
+                    yield "Name".Length
+                    yield "Description".Length
+                for (YamlKey rawKey, _) in fields do
+                    yield (toPascalCase rawKey).Length
+            }
+        max 16 (Seq.max candidates)
+
+    let appendField (namePad: int) (name: string) (typeStr: string) (annotation: string) =
         sb.Append("    ")
-          .Append(name.PadRight(16))
-          .Append(": ")
+          .Append(name.PadRight(namePad))
+          .Append(" : ")
           .Append(typeStr.PadRight(34))
           .Append(" // ")
           .AppendLine(annotation)
         |> ignore
 
-    let isReservedKey (YamlKey k) = k = "name" || k = "description"
-
     // --- Root record -------------------------------------------------------
-    sb.AppendLine("type SkillDefinition = {") |> ignore
-    appendField "Path"        "AbsoluteFilePath" "always (synthesised by the scanner)"
-    appendField "Name"        "SkillName"        "required (SKILL.md convention)"
-    appendField "Description" "SkillDescription" "required (SKILL.md convention)"
-
-    let topLevel =
+    let topLevelEntries =
         report.Schema
         |> Map.toSeq
-        |> Seq.filter (fun (k, _) -> not (isReservedKey k))
+        |> Seq.filter (fun (k, _) -> not (isSkillSpecialKey k))
         |> Seq.sortBy (fun (YamlKey k, _) -> k)
         |> Seq.toList
 
-    for (yamlKey, schema) in topLevel do
+    let rootPad = computeNamePadding isSkillMode topLevelEntries
+
+    sb.AppendLine("type SkillDefinition = {") |> ignore
+    appendField rootPad "Path" "AbsoluteFilePath" "always (synthesised by the scanner)"
+
+    if isSkillMode then
+        appendField rootPad "Name"        "SkillName"        "required (SKILL.md convention)"
+        appendField rootPad "Description" "SkillDescription" "required (SKILL.md convention)"
+
+    for (yamlKey, schema) in topLevelEntries do
         let (YamlKey rawKey) = yamlKey
         let propName = toPascalCase rawKey
         let inner    = renderType propName schema.Type
         let typeStr  = inner + " option"
         let count    = Map.tryFind yamlKey report.FieldOccurrences |> Option.defaultValue 0
         let annotation = sprintf "present in %d/%d files" count report.FilesScanned
-        appendField propName typeStr annotation
+        appendField rootPad propName typeStr annotation
 
     sb.AppendLine("}") |> ignore
 
@@ -325,6 +357,9 @@ let formatSchema (report: DiscoveryReport) : string =
             fields
             |> Map.toSeq
             |> Seq.sortBy (fun (YamlKey k, _) -> k)
+            |> Seq.toList
+
+        let nestedPad = computeNamePadding false entries
 
         for (yamlKey, schema) in entries do
             let (YamlKey rawKey) = yamlKey
@@ -334,46 +369,25 @@ let formatSchema (report: DiscoveryReport) : string =
             let annotation =
                 if schema.PresentInAll then "always present in this record"
                 else "optional within this record"
-            appendField propName typeStr annotation
+            appendField nestedPad propName typeStr annotation
 
         sb.AppendLine("}") |> ignore
         i <- i + 1
 
     if report.FilesScanned = 0 then
         sb.AppendLine() |> ignore
-        sb.AppendLine("// (no skill files were scanned — schema is the SKILL.md baseline)") |> ignore
+        sb.AppendLine("// (no files matched — schema reflects only the mode-required fields)") |> ignore
 
     sb.ToString()
 
-// ---------------------------------------------------------------------------
-// Runtime typed value (used by generated property bodies)
-// ---------------------------------------------------------------------------
+/// Render the discovered schema for a *general* / non-skill collection: every
+/// field is optional, no special handling for `name` / `description`. Use
+/// `formatSchemaForMode` if the rendering should match a specific TP Mode.
+let formatSchema (report: DiscoveryReport) : string =
+    formatSchemaCore false report
 
-type YamlValue =
-    | YString of string
-    | YBool   of bool
-    | YInt    of int
-    | YFloat  of float
-    | YList   of YamlValue list
-    | YMap    of Map<YamlKey, YamlValue>
-
-let rec objToValue (node: obj) : YamlValue =
-    match node with
-    | null                  -> YString ""
-    | :? bool   as b        -> YBool b
-    | :? int    as i        -> YInt i
-    | :? int64  as i        -> YInt (int i)
-    | :? double as d        -> YFloat d
-    | :? single as f        -> YFloat (float f)
-    | :? string as s        -> YString s
-    | :? IDictionary as dict ->
-        let entries =
-            [ for entry in dict ->
-                let entry = entry :?> DictionaryEntry
-                toYamlKey entry.Key, objToValue entry.Value ]
-            |> Map.ofList
-        YMap entries
-    | :? IList as list ->
-        [ for x in list -> objToValue x ]
-        |> YList
-    | other -> YString (string other)
+/// Render the discovered schema in the way that matches the supplied schema.
+/// Used by the type provider's `Describe()` so the printed F# record matches
+/// the actual properties the TP generated for that mode.
+let formatSchemaForMode (isSkillMode: bool) (report: DiscoveryReport) : string =
+    formatSchemaCore isSkillMode report

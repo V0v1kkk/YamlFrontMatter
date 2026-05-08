@@ -102,6 +102,55 @@ xUnit's `--filter` matches against `FullyQualifiedName` (case-sensitive); use `~
 
 ---
 
+## Open ideas / future work
+
+Loose ends and "we should think about this" items. Not tracked as issues yet
+because most need more scoping; capturing here so they aren't lost.
+
+### Pass a custom schema to the Type Provider
+
+Right now the TP's `Mode` static parameter is a string token (`"skill"` /
+`"general"`) — F# TP static parameters can only carry primitive types, not
+the full `FrontMatterSchema` DU. Anyone wanting custom validation rules
+(e.g. "every file must have a non-empty `origin`") has to fall back to the
+core API (`Scanner.scanAll` / `FrontMatterReader.tryRead`).
+
+There's almost certainly *a* way to bridge this — candidates worth thinking
+about, none implemented:
+
+- **Schema-name registry**: register named schemas at app start
+  (`Schemas.register "blog" (General |> requireString "title" |> ...)`),
+  then the TP looks them up by name passed via `Mode = "blog"`.
+  Limitation: schemas have to be registered in the consumer's process the
+  TP is loaded into — practical for a script that defines the schema then
+  uses it, awkward for a library that wants its own.
+- **JSON Schema file + path**: the `JsonSchemaFile of AbsoluteFilePath`
+  case we left commented in `Schemas.fs`. The TP gets a path string,
+  parses+compiles the JSON Schema at design time. Adds a JSON-Schema-validator
+  dependency, but hits the original goal directly.
+- **Schema source as a static string**: pass schema as a YAML/JSON string
+  in the `Mode` parameter; TP parses it. Cumbersome for non-trivial schemas
+  but fully self-contained.
+
+When investigating, start with `src/YamlFrontMatter.TypeProvider.DesignTime/SkillCollectionProvider.fs` —
+that's the design-time entry point, where `Mode` is currently parsed.
+
+### Diagnostic-quality improvements to ValidationFailure
+
+Currently `MissingField` / `WrongType` / `EmptyString` give precise but
+mechanical diagnostics. A nice-to-have: when a field is missing but a
+near-spelling exists (`origin` missing, `source` present), surface that as
+a hint. Not in the failure DU itself (keep it pure data), but as a separate
+"explain failure in context" function:
+
+```fsharp
+val Schemas.suggestNeighbors : RawFrontMatter -> ValidationFailure -> string option
+```
+
+Levenshtein-1 over the actual field set is probably enough.
+
+---
+
 ## Type Provider authoring
 
 The TP follows the **two-project layout** that's the official `FSharp.TypeProviders.SDK` recommendation:

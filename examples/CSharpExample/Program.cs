@@ -3,8 +3,11 @@ using Microsoft.FSharp.Collections;
 using Microsoft.FSharp.Core;
 using YamlFrontMatter;
 using static YamlFrontMatter.Types;
+using static YamlFrontMatter.Schemas;
 using static YamlFrontMatter.Scanner;
 using static YamlFrontMatter.SchemaInference;
+using static YamlFrontMatter.FrontMatterReader;
+using static YamlFrontMatter.Skill;
 
 var skillsDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "Skills"));
 
@@ -12,48 +15,74 @@ Console.WriteLine("=== YamlFrontMatter — C# Interop Demo ===");
 Console.WriteLine();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. Read a single file with Scanner.tryReadOne
+// 1. Single-file read with schema validation: FrontMatterReader.tryRead
 // ─────────────────────────────────────────────────────────────────────────────
 
-Console.WriteLine("── 1. Read a single file ──");
+Console.WriteLine("── 1. Read a single file with schema validation ──");
 Console.WriteLine();
 
 var complexPath = AbsoluteFilePathModule.createUnsafe(
     Path.Combine(skillsDir, "complex", "SKILL.md"));
 
-var readResult = Scanner.tryReadOne(complexPath);
+// `tryRead` takes a FrontMatterSchema. `Skill` requires non-empty name+description.
+// Use `General` if you want to read any front matter without enforcing fields.
+var readResult = FrontMatterReader.tryRead(FrontMatterSchema.Skill, complexPath);
 
-if (readResult.IsOk && FSharpOption<RawSkillData>.get_IsSome(readResult.ResultValue))
+if (readResult.IsOk)
 {
-    var data = readResult.ResultValue.Value;
+    var data = readResult.ResultValue;
     Console.WriteLine($"  Path: {data.Path.Value}");
-    Console.WriteLine($"  Fields:");
+    Console.WriteLine("  Fields:");
     PrintFields(data.Fields, indent: 4);
+}
+else
+{
+    Console.WriteLine($"  [{FormatReadProblem(readResult.ErrorValue)}]");
 }
 Console.WriteLine();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 2. Schema inference — discover unified schema across all files
+// 2. Skill-identity API: focused "is this a skill, and what's its name?"
 // ─────────────────────────────────────────────────────────────────────────────
 
-Console.WriteLine("── 2. Schema Inference ──");
+Console.WriteLine("── 2. tryReadSkillIdentity — typed name+description in one call ──");
+Console.WriteLine();
+
+var skillIdResult = Skill.tryReadSkillIdentity(complexPath);
+if (skillIdResult.IsOk)
+{
+    var id = skillIdResult.ResultValue;
+    Console.WriteLine($"  Name:        {id.Name.Value}");
+    Console.WriteLine($"  Description: {id.Description.Value}");
+}
+else
+{
+    Console.WriteLine($"  Not a skill: {FormatSkillReadProblem(skillIdResult.ErrorValue)}");
+}
+Console.WriteLine();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 3. Schema inference — discover the union schema across all files
+// ─────────────────────────────────────────────────────────────────────────────
+
+Console.WriteLine("── 3. Schema Inference ──");
 Console.WriteLine();
 
 var report = SchemaInference.discoverSchemaWithStats(skillsDir, "SKILL.md");
 var schemaText = SchemaInference.formatSchema(report);
 
 Console.WriteLine($"  Files scanned: {report.FilesScanned}");
-Console.WriteLine($"  Inferred F# record type:");
+Console.WriteLine("  Inferred F# record type:");
 Console.WriteLine();
 foreach (var line in schemaText.Split('\n'))
     Console.WriteLine($"    {line}");
 Console.WriteLine();
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Streaming scanner via System.Threading.Channels
+// 4. Streaming scanner — schema-aware, three buckets (Valid / Rejected / Skipped)
 // ─────────────────────────────────────────────────────────────────────────────
 
-Console.WriteLine("── 3. Channel-based streaming scanner ──");
+Console.WriteLine("── 4. Channel-based streaming scanner ──");
 Console.WriteLine();
 
 var scanOptions = new ScanOptions(
@@ -64,50 +93,58 @@ var scanOptions = new ScanOptions(
     resultQueueCapacity: 64);
 
 using var cts = new CancellationTokenSource();
-ChannelReader<FSharpResult<FSharpOption<RawSkillData>, ScanError>> reader =
-    Scanner.scan(scanOptions, cts.Token);
+ChannelReader<ScanItem> reader = Scanner.scan(FrontMatterSchema.Skill, scanOptions, cts.Token);
+
+var validCount = 0;
+var rejectedCount = 0;
+var skippedCount = 0;
 
 while (reader.WaitToReadAsync(cts.Token).AsTask().GetAwaiter().GetResult())
 {
-    while (reader.TryRead(out var result))
+    while (reader.TryRead(out var item))
     {
-        if (result.IsOk)
+        switch (item)
         {
-            var maybeSkill = result.ResultValue;
-            if (FSharpOption<RawSkillData>.get_IsSome(maybeSkill))
-            {
-                var skill = maybeSkill.Value;
+            case ScanItem.ItemValid v:
+                validCount++;
                 var nameKey = YamlKey.NewYamlKey("name");
-                var name = MapModule.TryFind(nameKey, skill.Fields);
-
+                var name = MapModule.TryFind(nameKey, v.Item.Fields);
                 var displayName = FSharpOption<YamlValue>.get_IsSome(name)
                     ? FormatYamlValue(name.Value)
                     : "(unnamed)";
+                Console.WriteLine($"  [VALID]    {displayName} — {v.Item.Path.Value}");
+                break;
 
-                Console.WriteLine($"  [OK] {displayName} — {skill.Path.Value}");
-            }
-        }
-        else
-        {
-            Console.WriteLine($"  [ERR] {FormatScanError(result.ErrorValue)}");
+            case ScanItem.ItemRejected r:
+                rejectedCount++;
+                Console.WriteLine($"  [REJECTED] {r.path.Value}");
+                foreach (var f in r.failures)
+                    Console.WriteLine($"             • {FormatValidationFailure(f)}");
+                break;
+
+            case ScanItem.ItemSkipped s:
+                skippedCount++;
+                Console.WriteLine($"  [SKIPPED]  {s.path.Value}: {FormatSkipReason(s.reason)}");
+                break;
         }
     }
 }
 
 Console.WriteLine();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. Working with YamlValue DU — pattern matching from C#
-// ─────────────────────────────────────────────────────────────────────────────
-
-Console.WriteLine("── 4. Pattern matching YamlValue from C# ──");
+Console.WriteLine($"  Totals — valid={validCount} rejected={rejectedCount} skipped={skippedCount}");
 Console.WriteLine();
 
-if (readResult.IsOk && FSharpOption<RawSkillData>.get_IsSome(readResult.ResultValue))
-{
-    var fields = readResult.ResultValue.Value.Fields;
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. YamlValue pattern matching from C#
+// ─────────────────────────────────────────────────────────────────────────────
 
-    // Extract typed values by key
+Console.WriteLine("── 5. Pattern matching YamlValue from C# ──");
+Console.WriteLine();
+
+if (readResult.IsOk)
+{
+    var fields = readResult.ResultValue.Fields;
+
     var activeKey = YamlKey.NewYamlKey("active");
     var priorityKey = YamlKey.NewYamlKey("priority");
     var tagsKey = YamlKey.NewYamlKey("tags");
@@ -141,7 +178,7 @@ Console.WriteLine();
 Console.WriteLine("── Done! ──");
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Formatting helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
 static void PrintFields(FSharpMap<YamlKey, YamlValue> fields, int indent)
@@ -162,10 +199,48 @@ static string FormatYamlValue(YamlValue value) => value switch
     _ => value.ToString() ?? ""
 };
 
-static string FormatScanError(ScanError error) => error switch
+static string FormatValidationFailure(ValidationFailure f) => f switch
 {
-    ScanError.MissingClosingDelimiter e => $"Missing closing delimiter: {e.Item.Value}",
-    ScanError.YamlParseFailed e => $"YAML parse failed: {e.Item1.Value} — {e.Item2.Message}",
-    ScanError.FileReadFailed e => $"File read failed: {e.Item1.Value} — {e.Item2.Message}",
-    _ => error.ToString() ?? ""
+    ValidationFailure.MissingField mf => $"missing required field: {mf.Item.Value}",
+    ValidationFailure.EmptyString es => $"empty required string: {es.Item.Value}",
+    ValidationFailure.WrongType wt => $"field '{wt.key.Value}' has wrong type (expected {wt.expected})",
+    _ => f.ToString() ?? ""
 };
+
+// F# DU cases without payload are singleton values (Is<Case> properties),
+// while cases with payload are nested types. The patterns below show both.
+
+static string FormatSkipReason(SkipReason r)
+{
+    if (r.IsNoFrontMatter)       return "no front matter";
+    if (r.IsUnclosedFrontMatter) return "front matter unclosed";
+    if (r is SkipReason.YamlMalformed m) return $"yaml malformed: {m.detail}";
+    if (r is SkipReason.IoFailure io)    return $"IO error: {io.message}";
+    return r.ToString() ?? "";
+}
+
+static string FormatReadProblem(ReadProblem p)
+{
+    if (p.IsNoFrontMatter)       return "no front matter";
+    if (p.IsUnclosedFrontMatter) return "front matter unclosed";
+    if (p is ReadProblem.YamlMalformed m) return $"yaml malformed: {m.detail}";
+    if (p is ReadProblem.IoFailure io)    return $"IO error: {io.message}";
+    if (p is ReadProblem.ValidationFailed v)
+        return "validation failed: " + string.Join("; ", v.failures.Select(FormatValidationFailure));
+    return p.ToString() ?? "";
+}
+
+static string FormatSkillReadProblem(SkillReadProblem p)
+{
+    if (p.IsNoFrontMatter)       return "no front matter (not a skill)";
+    if (p.IsUnclosedFrontMatter) return "front matter unclosed";
+    if (p is SkillReadProblem.YamlMalformed m) return $"yaml malformed: {m.detail}";
+    if (p.IsNameMissing)         return "missing 'name'";
+    if (p.IsNameEmpty)           return "'name' is empty";
+    if (p is SkillReadProblem.NameNotString ns) return $"'name' is not a string ({ns.actual})";
+    if (p.IsDescriptionMissing)  return "missing 'description'";
+    if (p.IsDescriptionEmpty)    return "'description' is empty";
+    if (p is SkillReadProblem.DescriptionNotString ds) return $"'description' is not a string ({ds.actual})";
+    if (p is SkillReadProblem.IoFailure io) return $"IO error: {io.message}";
+    return p.ToString() ?? "";
+}

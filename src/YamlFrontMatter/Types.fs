@@ -1,6 +1,7 @@
 module YamlFrontMatter.Types
 
 open System
+open System.Collections
 
 [<Struct>]
 type AbsoluteFilePath = private AbsoluteFilePath of string with
@@ -49,4 +50,61 @@ type YamlKey = YamlKey of string with
 module YamlKey =
     let value (YamlKey v) = v
     let create (s: string) = YamlKey s
+
+// ---------------------------------------------------------------------------
+// Runtime-typed YAML value
+//
+// What VYaml's `Deserialize<obj>` returns gets normalised into this DU once
+// at parse time, so downstream code (TP runtime helpers, Skill projection,
+// validation) pattern-matches on a clean F# shape instead of poking `obj`.
+// Lives here in Types.fs because RawFrontMatter (right below) carries it,
+// and several modules (SchemaInference, Scanner, Schemas, Skill) all need
+// to pattern-match on it.
+// ---------------------------------------------------------------------------
+
+type YamlValue =
+    | YString of string
+    | YBool   of bool
+    | YInt    of int
+    | YFloat  of float
+    | YList   of YamlValue list
+    | YMap    of Map<YamlKey, YamlValue>
+
+let private toYamlKey (k: obj) : YamlKey =
+    match k with
+    | :? string as s -> YamlKey s
+    | other          -> YamlKey (string other)
+
+let rec objToValue (node: obj) : YamlValue =
+    match node with
+    | null                  -> YString ""
+    | :? bool   as b        -> YBool b
+    | :? int    as i        -> YInt i
+    | :? int64  as i        -> YInt (int i)
+    | :? double as d        -> YFloat d
+    | :? single as f        -> YFloat (float f)
+    | :? string as s        -> YString s
+    | :? IDictionary as dict ->
+        let entries =
+            [ for entry in dict ->
+                let entry = entry :?> DictionaryEntry
+                toYamlKey entry.Key, objToValue entry.Value ]
+            |> Map.ofList
+        YMap entries
+    | :? IList as list ->
+        [ for x in list -> objToValue x ]
+        |> YList
+    | other -> YString (string other)
+
+// ---------------------------------------------------------------------------
+// Parsed front-matter for a single file
+//
+// The raw, schema-agnostic result of reading one file's YAML front matter.
+// Validation, projection to typed identities (SkillIdentity), and TP property
+// access all build on top of this.
+// ---------------------------------------------------------------------------
+
+type RawFrontMatter =
+    { Path:   AbsoluteFilePath
+      Fields: Map<YamlKey, YamlValue> }
 

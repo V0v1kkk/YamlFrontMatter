@@ -16,7 +16,10 @@
     <Compile Include="Types.fs" />
     <Compile Include="FrontMatterTextReader.fs" />
     <Compile Include="SchemaInference.fs" />
-    <Compile Include="SkillScanner.fs" />
+    <Compile Include="Schemas.fs" />
+    <Compile Include="FrontMatterReader.fs" />
+    <Compile Include="Scanner.fs" />
+    <Compile Include="Skill.fs" />
   </ItemGroup>
 
   <ItemGroup>

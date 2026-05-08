@@ -147,6 +147,26 @@ Confirm:
 
 If a dep is missing, check `bin/Release/<tfm>/` of the design-time project — was it copied? If not, fix `CopyLocalLockFileAssemblies` or `Content Include`. If it's there but didn't make it into the package, the `IsFSharpDesignTimeProvider` link from Runtime → DesignTime is missing or malformed.
 
+## CI gotcha: prefer `dotnet pack <sln>` over `dotnet pack <fsproj>`
+
+Field-tested observation (2026): on Linux GitHub Actions runners with `dotnet 10.0.x`, packing the runtime project individually (`dotnet pack src/MyProvider.TypeProvider/MyProvider.TypeProvider.fsproj -c Release /p:Version=X.Y.Z -o artifacts`) **intermittently drops the design-time DLL** from the resulting `.nupkg`. The published package shows up with only `lib/<tfm>/MyProvider.TypeProvider.dll` — no `typeproviders/` folder at all, even though the same commit + same SDK version on a developer machine packs the package correctly with all design-time DLLs included.
+
+The exact root cause is unclear (likely a race between MSBuild's incremental rebuild triggered by `/p:Version=...` and the SDK target `CollectFSharpDesignTimeTools` which depends on the design-time project's bin output being present), but the workaround is reliable:
+
+```yaml
+# Bad — works locally, intermittently produces empty packages on CI:
+- run: dotnet pack src/MyProvider/MyProvider.fsproj -c Release /p:Version=...
+- run: dotnet pack src/MyProvider.TypeProvider/MyProvider.TypeProvider.fsproj -c Release /p:Version=...
+
+# Good — single command, packs every IsPackable=true project in solution
+# in one MSBuild invocation, no cross-pack timing window:
+- run: dotnet pack MyProvider.sln -c Release /p:Version=...
+```
+
+To keep individual projects out of the artifact set, mark them `<IsPackable>false</IsPackable>` in their `.fsproj` (DesignTime and Tests projects already need this anyway).
+
+**How to spot the bug**: after `dotnet pack`, inspect the package size. A correct TPDTC-bundled package is typically several hundred KB to multiple MB (it carries `ProvidedTypes.fs[i]` compiled in, plus all design-time deps). A broken one with only the runtime stub is usually under 50 KB. If your TP package is 25-30 KB, check the layout — it's almost certainly missing the design-time component.
+
 ## Common error: `Could not load file or assembly 'YamlDotNet'`
 
 Surface: consumer compiles, F# emits "could not load assembly YamlDotNet" pointing at the design-time DLL.

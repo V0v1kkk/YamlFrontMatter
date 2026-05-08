@@ -33,37 +33,74 @@ metadata:
 ---
 ```
 
-Reference the provider with a static directory path:
+Reference the provider with a static directory path. By default the library treats the collection as a **generic** YAML front-matter directory — every field is optional. Pass `Mode = "skill"` to enforce the SKILL.md convention (`name` and `description` must be non-empty strings, exposed as typed `SkillName` / `SkillDescription`):
 
 ```fsharp
 open YamlFrontMatter
 
-type Skills = FrontMatterProvider<"/path/to/skills">
+// SKILL.md collection — name and description are required
+type Skills = FrontMatterProvider<"/path/to/skills", Mode = "skill">
+for s in Skills.GetAll() do
+    printfn "%s — %s" s.Name.Value s.Description.Value
 
-for skill in Skills.GetAll() do
-    printfn "%s (v%s, active=%A)" skill.Name.Value skill.Version skill.Active
+// Generic YAML-front-matter collection — every field is `option`
+type Posts = FrontMatterProvider<"/path/to/posts", Pattern = "*.md">
+for p in Posts.GetAll() do
+    printfn "%A — %A" p.Title p.Date
 ```
 
 The provider scans the directory at **compile time**, infers a cross-file schema, and generates:
 
-- `FrontMatterDefinition` — an erased type with typed properties for every discovered YAML key
-- `GetAll()` — returns `seq<FrontMatterDefinition>` by scanning the directory at runtime
-- `Describe()` — returns the inferred schema as an F# record declaration (useful for code generation and documentation)
+- `FrontMatterDefinition` — an erased type with typed properties for every discovered YAML key. In `skill` mode, `Name` and `Description` are non-optional and typed as `SkillName` / `SkillDescription`.
+- `GetAll()` — returns `seq<FrontMatterDefinition>` for files that pass schema validation.
+- `GetRejected()` — files that have front matter but failed the schema (missing required field, wrong type, empty string) along with the precise per-field failure list.
+- `GetSkipped()` — files that aren't front-matter documents at all (no `---` block, malformed YAML, IO error).
+- `Describe()` — returns the inferred schema as an F# record declaration. Useful for code generation, documentation, and quick auditing.
 
 ### Use the Core library directly
 
 ```fsharp
+open YamlFrontMatter.Types
+open YamlFrontMatter.Schemas
 open YamlFrontMatter.SchemaInference
+open YamlFrontMatter.FrontMatterReader
 open YamlFrontMatter.Scanner
 
-// Infer schema from a directory
+// Single-file read with schema validation
+let path = AbsoluteFilePath.createUnsafe "/path/to/SKILL.md"
+match tryRead Skill path with
+| Ok raw                          -> printfn "valid: %A" raw.Path
+| Error (ValidationFailed fs)     -> printfn "rejected: %A" fs
+| Error other                     -> printfn "skipped: %A" other
+
+// Schema discovery across a directory (no validation — just shape inference)
 let report = discoverSchemaWithStats "/path/to/skills" "SKILL.md"
 printfn "%s" (formatSchema report)
 
-// Stream-scan files in parallel via System.Threading.Channels
-let reader = scan scanOptions cancellationToken
-// ... consume ChannelReader<Result<RawSkillData option, ScanError>>
+// Streaming scanner — three buckets via ScanItem DU
+let opts = { RootDirectory = AbsoluteFilePath.createUnsafe "/path/to/skills"
+             Pattern = "SKILL.md"; Parallelism = 8
+             PathQueueCapacity = 256; ResultQueueCapacity = 256 }
+let reader = scan Skill opts cancellationToken
+// reader yields ScanItem = ItemValid raw | ItemRejected (path, failures) | ItemSkipped (path, reason)
 ```
+
+### Skill-identity API: "is this file a skill, and what's its name?"
+
+If you have a single file that *might* be a SKILL.md and you want a typed result with rich error reasons:
+
+```fsharp
+open YamlFrontMatter.Skill
+
+match tryReadSkillIdentity (AbsoluteFilePath.createUnsafe path) with
+| Ok id                          -> printfn "%s — %s" (SkillName.value id.Name) (SkillDescription.value id.Description)
+| Error NoFrontMatter            -> printfn "not a skill (no front matter)"
+| Error NameMissing              -> printfn "looks like a broken skill — missing name"
+| Error (NameNotString actual)   -> printfn "name is not a string: %A" actual
+| Error problem                  -> printfn "%A" problem
+```
+
+This is a thin specialisation of `tryRead Skill` — same parsing, but the error DU is narrowed to skill-specific cases (`NameMissing`, `NameEmpty`, `NameNotString`, `DescriptionMissing`, ...) and the success type is the typed `SkillIdentity` record.
 
 See `[examples/FSharpExample/](examples/FSharpExample/)` for a complete working demo.
 
@@ -270,16 +307,24 @@ The workflow runs tests, packs `YamlFrontMatter`, `YamlFrontMatter.TypeProvider`
   - Repository owner: `V0v1kkk`, Repository: `YamlFrontMatter`, Workflow: `publish.yml`
 2. In GitHub repository secrets, add `NUGET_USER` with your nuget.org profile name
 
+## AI-agent skill: analysing your collection
+
+If you use an AI coding assistant (Claude Code, OpenAI Codex, etc.), this repo ships a **product skill** that teaches the assistant how to use this Type Provider in `dotnet fsi` scripts to inspect and audit any directory of YAML-front-matter Markdown files:
+
+- [`skill/yamlfm-collection-analysis/`](skill/yamlfm-collection-analysis/) — the describe-first-then-query workflow, with four worked example scripts (`describe.fsx`, `count_by_category.fsx`, `find_outliers.fsx`, `audit.fsx`) all validated against a real collection.
+
+Point your assistant at this skill the first time you ask it to analyse a Markdown collection — it'll produce typed F# scripts with autocomplete-friendly field access and surface real findings (missing fields, alternate spellings, versioning inconsistencies, authorship distributions) without guessing the schema.
+
 ## Contributing
 
 See [AGENTS.md](AGENTS.md) for repository structure, conventions, and contribution guidance — written for both AI coding assistants and human contributors.
 
-This repo also bundles two custom **AI-agent skills** under [`.skills/`](.skills/):
+For agents working **on** this repository (not consumers of the package), two **dev-time skills** live under [`.skills/`](.skills/):
 
 - [`.skills/fsharp-style/`](.skills/fsharp-style/) — F# coding-style guide capturing the conventions this codebase follows (single-case DU shape, active patterns, computation expressions, anti-patterns).
 - [`.skills/fsharp-type-provider/`](.skills/fsharp-type-provider/) — comprehensive F# Type Provider authoring guide: project layout, erased vs generative, packaging, debugging, common pitfalls. Includes deeper reference material under `references/`.
 
-These skills are versioned with the source so any AI assistant that clones the repo (Claude Code, OpenAI Codex, etc.) gets the same opinionated guidance the maintainer's agent uses.
+These dev-time skills are versioned with the source so any AI assistant that clones the repo to **modify the codebase** gets the same opinionated guidance the maintainer's agent uses. They are distinct from the [product skill above](#ai-agent-skill-analysing-your-collection), which is for **consumers** of the published package.
 
 ## License
 

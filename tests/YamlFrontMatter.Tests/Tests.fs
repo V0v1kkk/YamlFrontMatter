@@ -13,7 +13,10 @@ open YamlFrontMatter
 [<Literal>]
 let FixturesDir = __SOURCE_DIRECTORY__ + "/Fixtures"
 
-type Fixtures = YamlFrontMatter.FrontMatterProvider<FixturesDir>
+// Tests target SKILL.md fixtures, so we explicitly request Mode = "skill"
+// to get typed `Name : SkillName` / `Description : SkillDescription` accessors.
+// (Default mode is "general" — see GeneralModeTests below.)
+type Fixtures = YamlFrontMatter.FrontMatterProvider<FixturesDir, Mode = "skill">
 
 // ---------------------------------------------------------------------------
 // Compile-time shape tests (type annotations = compile errors if schema is wrong)
