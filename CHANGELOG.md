@@ -28,6 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **FSharp.Core Dependency Versioning**:
-  - Pinned `FSharp.Core` package reference version to `10.*` in `Directory.Build.props` to prevent `NU1605` package downgrade warnings on .NET 10.0.10x installations and `dotnet fsi`.
+  - Pinned `FSharp.Core` package reference version to `10.0.101` in `Directory.Build.props` to prevent `NU1605` package downgrade warnings on .NET 10.0.10x installations and `dotnet fsi`.
 - **Validation-Aware Schema Discovery**:
   - `Describe()`, `--schema`, and `FrontMatterDefinition` now filter out documents failing schema validation so rejected samples (e.g. unexpected fields or malformed embedded YAML) do not pollute the generated schema.
