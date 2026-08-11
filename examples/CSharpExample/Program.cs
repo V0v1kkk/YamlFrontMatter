@@ -204,6 +204,9 @@ static string FormatValidationFailure(ValidationFailure f) => f switch
     ValidationFailure.MissingField mf => $"missing required field: {mf.Item.Value}",
     ValidationFailure.EmptyString es => $"empty required string: {es.Item.Value}",
     ValidationFailure.WrongType wt => $"field '{wt.key.Value}' has wrong type (expected {wt.expected})",
+    ValidationFailure.UnknownField uf => $"unknown field: {uf.Item.Value}",
+    ValidationFailure.InvalidFormat ifmt => $"invalid format for '{ifmt.key.Value}': {ifmt.detail}",
+    ValidationFailure.InvalidEmbeddedMetadata iem => $"invalid embedded metadata in '{iem.key.Value}': {iem.detail}",
     _ => f.ToString() ?? ""
 };
 

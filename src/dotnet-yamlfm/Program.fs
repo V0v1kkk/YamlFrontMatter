@@ -33,6 +33,12 @@ let private printRejection (path: AbsoluteFilePath) (failures: ValidationFailure
             eprintfn "  • empty required string: %s" k
         | WrongType (YamlKey k, expected, _) ->
             eprintfn "  • field '%s' has wrong type (expected %A)" k expected
+        | UnknownField (YamlKey k) ->
+            eprintfn "  • unknown field: %s" k
+        | InvalidFormat (YamlKey k, detail) ->
+            eprintfn "  • invalid format for '%s': %s" k detail
+        | InvalidEmbeddedMetadata (YamlKey k, detail) ->
+            eprintfn "  • invalid embedded metadata in '%s': %s" k detail
 
 let rec private printValue (indent: int) (value: YamlValue) =
     let pad = String(' ', indent)
@@ -51,12 +57,13 @@ let rec private printValue (indent: int) (value: YamlValue) =
             printfn "%s%s:" pad k
             printValue (indent + 2) kv.Value
 
-let private parseMode (s: string) : FrontMatterSchema =
+let private parseMode (s: string) (embeddedKey: string option) : FrontMatterSchema =
     match s.Trim().ToLowerInvariant() with
-    | "skill"   -> Skill
-    | "general" -> General
+    | "agent-skill" | "agentskill" -> AgentSkill embeddedKey
+    | "skill"                      -> Skill
+    | "general"                    -> General
     | other     ->
-        eprintfn "Unknown --mode '%s' (expected 'skill' or 'general'); using 'general'" other
+        eprintfn "Unknown --mode '%s' (expected 'agent-skill', 'skill', or 'general'); using 'general'" other
         General
 
 /// Default mode: stream item-by-item through the lazy scanner and dump every
@@ -117,15 +124,15 @@ let private dumpMetadata (rootDir: string) (schema: FrontMatterSchema) (pattern:
 
 /// Schema-discovery mode: synchronously walk the directory, infer the union
 /// schema across all files, and print it as F# record source.
-let private dumpSchema (rootDir: string) (pattern: string) : int =
-    let report = discoverSchemaWithStats rootDir pattern
-    printfn "%s" (formatSchema report)
+let private dumpSchema (rootDir: string) (pattern: string) (mode: string) (embeddedKey: string option) : int =
+    let report, extensionReport = discoverSchemaWithStatsAndExtension rootDir pattern embeddedKey
+    printfn "%s" (formatSchemaForModeWithExtension mode embeddedKey report extensionReport)
     0
 
 let private printUsage () =
     eprintfn "Usage:"
-    eprintfn "  yamlfm <directory> [--mode skill|general] [--pattern <glob>]"
-    eprintfn "  yamlfm <directory> --schema [--pattern <glob>]"
+    eprintfn "  yamlfm <directory> [--mode agent-skill|skill|general] [--embedded-key <key>] [--pattern <glob>]"
+    eprintfn "  yamlfm <directory> --schema [--mode agent-skill|skill|general] [--embedded-key <key>] [--pattern <glob>]"
     eprintfn ""
     eprintfn "Defaults: --mode general   --pattern SKILL.md"
     1
@@ -134,7 +141,8 @@ let private printUsage () =
 let main argv =
     // Tiny argv parser. Order-independent flags; positional arg = directory.
     let mutable rootDir = ""
-    let mutable mode    = General
+    let mutable modeStr = "general"
+    let mutable embeddedKey = None
     let mutable pattern = "SKILL.md"
     let mutable schemaMode = false
     let mutable bad        = false
@@ -146,7 +154,10 @@ let main argv =
             schemaMode <- true
             i <- i + 1
         | "--mode" when i + 1 < argv.Length ->
-            mode <- parseMode argv.[i + 1]
+            modeStr <- argv.[i + 1]
+            i <- i + 2
+        | "--embedded-key" when i + 1 < argv.Length ->
+            embeddedKey <- Some argv.[i + 1]
             i <- i + 2
         | "--pattern" when i + 1 < argv.Length ->
             pattern <- argv.[i + 1]
@@ -163,6 +174,7 @@ let main argv =
         eprintfn "Directory does not exist: %s" rootDir
         1
     elif schemaMode then
-        dumpSchema rootDir pattern
+        dumpSchema rootDir pattern modeStr embeddedKey
     else
-        (dumpMetadata rootDir mode pattern).GetAwaiter().GetResult()
+        let schema = parseMode modeStr embeddedKey
+        (dumpMetadata rootDir schema pattern).GetAwaiter().GetResult()

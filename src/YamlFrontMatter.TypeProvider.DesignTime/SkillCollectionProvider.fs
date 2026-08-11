@@ -1,5 +1,6 @@
 module YamlFrontMatter.TypeProvider.DesignTime.Provider
 
+open System
 open System.IO
 open System.Reflection
 open FSharp.Core.CompilerServices
@@ -87,14 +88,24 @@ let rec private generateMappingType
 // ---------------------------------------------------------------------------
 // Build the FrontMatterDefinition provided type
 //
-// In `skill` mode, `Name : SkillName` and `Description : SkillDescription`
+// In `skill` and `agent-skill` modes, `Name : SkillName` and `Description : SkillDescription`
 // are emitted as typed *required* properties (validation guarantees their
-// presence). In `general` mode, they're not special-cased — they show up as
-// regular `string option` fields if the discovery saw them.
+// presence). In `agent-skill` mode with `EmbeddedMetadataKey` configured,
+// `ExtensionMetadata : ExtensionMetadataData option` is also generated.
+// In `general` mode, they're not special-cased — they show up as regular
+// `string option` fields if the discovery saw them.
 // ---------------------------------------------------------------------------
 
-let private buildFrontMatterDefinition (isSkillMode: bool) (schema: DiscoveredSchema) : ProvidedTypeDefinition =
+let private buildFrontMatterDefinition
+    (modeToken: string)
+    (embeddedKey: string)
+    (schema: DiscoveredSchema)
+    (extensionSchema: DiscoveredSchema option)
+    : ProvidedTypeDefinition =
+
     let defType = ProvidedTypeDefinition("FrontMatterDefinition", Some typeof<RawFrontMatter>, isErased = true)
+    let isSkillMode = modeToken = "skill"
+    let isAgentSkillMode = modeToken = "agent-skill"
 
     // Path is always present (synthesised by the scanner).
     defType.AddMember(
@@ -103,8 +114,8 @@ let private buildFrontMatterDefinition (isSkillMode: bool) (schema: DiscoveredSc
                 let raw = args.[0]
                 <@@ (%%raw : RawFrontMatter).Path @@>))
 
-    // Name / Description are typed required properties *only* in skill mode.
-    if isSkillMode then
+    // Name / Description are typed required properties in skill and agent-skill mode.
+    if isSkillMode || isAgentSkillMode then
         defType.AddMember(
             ProvidedProperty("Name", typeof<SkillName>,
                 getterCode = fun args ->
@@ -112,7 +123,7 @@ let private buildFrontMatterDefinition (isSkillMode: bool) (schema: DiscoveredSc
                     <@@ let k = YamlKey "name"
                         match RuntimeHelpers.TryGetString(k, (%%raw : RawFrontMatter).Fields) with
                         | Some s -> SkillName.createUnsafe s
-                        | None   -> failwith "Required field 'name' is missing — bug: scanner should have rejected this file in skill mode" @@>))
+                        | None   -> failwith "Required field 'name' is missing — bug: scanner should have rejected this file" @@>))
 
         defType.AddMember(
             ProvidedProperty("Description", typeof<SkillDescription>,
@@ -121,12 +132,11 @@ let private buildFrontMatterDefinition (isSkillMode: bool) (schema: DiscoveredSc
                     <@@ let k = YamlKey "description"
                         match RuntimeHelpers.TryGetString(k, (%%raw : RawFrontMatter).Fields) with
                         | Some s -> SkillDescription.createUnsafe s
-                        | None   -> failwith "Required field 'description' is missing — bug: scanner should have rejected this file in skill mode" @@>))
+                        | None   -> failwith "Required field 'description' is missing — bug: scanner should have rejected this file" @@>))
 
-    // Field loop. Skip name/description only in skill mode; in general mode
-    // they're ordinary discovered fields and follow the same path as everyone else.
+    // Field loop. Skip name/description only in skill and agent-skill modes.
     let isSpecialName (rawKey: string) =
-        isSkillMode && (rawKey = "name" || rawKey = "description")
+        (isSkillMode || isAgentSkillMode) && (rawKey = "name" || rawKey = "description")
 
     for kv in schema do
         let yamlKey = kv.Key
@@ -190,20 +200,36 @@ let private buildFrontMatterDefinition (isSkillMode: bool) (schema: DiscoveredSc
 
             defType.AddMember prop
 
+    // ExtensionMetadata property when embeddedKey is configured
+    if isAgentSkillMode && not (String.IsNullOrWhiteSpace embeddedKey) then
+        let extSchema = extensionSchema |> Option.defaultValue Map.empty
+        let extTypeName = "ExtensionMetadataData"
+        let extType = generateMappingType extTypeName extSchema
+        defType.AddMember extType
+        let extProp =
+            ProvidedProperty("ExtensionMetadata", typedefof<option<_>>.MakeGenericType(extType),
+                getterCode = fun args ->
+                    let raw = args.[0]
+                    let keyStr = embeddedKey
+                    <@@ let k = YamlKey keyStr
+                        (RuntimeHelpers.TryGetExtensionMetadata(k, (%%raw : RawFrontMatter).Fields) : Map<YamlKey, YamlValue> option) @@>)
+        defType.AddMember extProp
+
     defType
 
 // ---------------------------------------------------------------------------
 // Mode parsing — the static parameter is a string; defaults to "general".
 // ---------------------------------------------------------------------------
 
-let private parseMode (raw: string) : FrontMatterSchema * bool =
+let private parseMode (raw: string) : FrontMatterSchema * string =
     let normalised =
         if isNull raw then "general"
         else raw.Trim().ToLowerInvariant()
     match normalised with
-    | "skill"   -> Skill,   true
-    | "general" -> General, false
-    | _         -> General, false   // forward-compat: unknown mode → permissive
+    | "agent-skill" | "agentskill" -> AgentSkill None, "agent-skill"
+    | "skill"                      -> Skill,           "skill"
+    | "general"                    -> General,         "general"
+    | _                            -> General,         "general"
 
 // ---------------------------------------------------------------------------
 // The TypeProvider
@@ -226,31 +252,30 @@ type FrontMatterTypeProvider(config: TypeProviderConfig) as this =
     let staticParams =
         [ ProvidedStaticParameter("RootDirectory", typeof<string>)
           ProvidedStaticParameter("Pattern",       typeof<string>, "SKILL.md")
-          ProvidedStaticParameter("Mode",          typeof<string>, "general") ]
+          ProvidedStaticParameter("Mode",          typeof<string>, "general")
+          ProvidedStaticParameter("EmbeddedMetadataKey", typeof<string>, "") ]
 
     do
         rootType.DefineStaticParameters(staticParams, fun typeName args ->
             let rootDir = args.[0] :?> string
             let pattern = args.[1] :?> string
             let modeRaw = args.[2] :?> string
+            let embeddedKeyRaw = if args.Length > 3 then args.[3] :?> string else ""
+            let embeddedKey = if isNull embeddedKeyRaw then "" else embeddedKeyRaw.Trim()
 
-            let _schema, isSkillMode = parseMode modeRaw
-            let modeToken = if isSkillMode then "skill" else "general"
+            let _schema, modeToken = parseMode modeRaw
+            let embeddedKeyOpt = if String.IsNullOrWhiteSpace embeddedKey then None else Some embeddedKey
 
-            // Schema-discovery is independent of validation: we union the field
-            // shape across *all* files in the directory, regardless of whether
-            // each one will eventually pass schema validation. The TP exposes
-            // every discovered field as `option`, so missing-from-some-files is
-            // safe at the property level.
-            let report =
+            let report, extensionReport =
                 if Directory.Exists rootDir then
-                    discoverSchemaWithStats rootDir pattern
+                    discoverSchemaWithStatsAndExtension rootDir pattern embeddedKeyOpt
                 else
-                    { Schema = Map.empty; FilesScanned = 0; FieldOccurrences = Map.empty }
+                    { Schema = Map.empty; FilesScanned = 0; FieldOccurrences = Map.empty }, None
 
             let root = ProvidedTypeDefinition(thisAsm, ns, typeName, Some typeof<obj>, isErased = true)
 
-            let fmDef = buildFrontMatterDefinition isSkillMode report.Schema
+            let extensionSchema = extensionReport |> Option.map (fun r -> r.Schema)
+            let fmDef = buildFrontMatterDefinition modeToken embeddedKey report.Schema extensionSchema
             root.AddMember fmDef
 
             // GetAll : unit -> seq<FrontMatterDefinition> — only items that
@@ -259,11 +284,13 @@ type FrontMatterTypeProvider(config: TypeProviderConfig) as this =
             let rootDir' = rootDir
             let pattern' = pattern
             let modeToken' = modeToken
+            let embeddedKey' = embeddedKey
+
             let getAll =
                 ProvidedMethod("GetAll", [], seqOfDef,
                     isStatic = true,
                     invokeCode = fun _args ->
-                        <@@ RuntimeHelpers.GetAll(rootDir', pattern', modeToken') @@>)
+                        <@@ RuntimeHelpers.GetAll(rootDir', pattern', modeToken', embeddedKey') @@>)
             getAll.AddXmlDoc
                 "Returns every file whose front matter passed schema validation. \
                  Files that failed validation are exposed via GetRejected(); files without front matter via GetSkipped()."
@@ -276,7 +303,7 @@ type FrontMatterTypeProvider(config: TypeProviderConfig) as this =
                 ProvidedMethod("GetRejected", [], seqOfRejection,
                     isStatic = true,
                     invokeCode = fun _args ->
-                        <@@ RuntimeHelpers.GetRejected(rootDir', pattern', modeToken') @@>)
+                        <@@ RuntimeHelpers.GetRejected(rootDir', pattern', modeToken', embeddedKey') @@>)
             getRejected.AddXmlDoc
                 "Returns files that have front matter but failed schema validation, \
                  along with the per-field validation failures."
@@ -289,7 +316,7 @@ type FrontMatterTypeProvider(config: TypeProviderConfig) as this =
                 ProvidedMethod("GetSkipped", [], seqOfSkip,
                     isStatic = true,
                     invokeCode = fun _args ->
-                        <@@ RuntimeHelpers.GetSkipped(rootDir', pattern', modeToken') @@>)
+                        <@@ RuntimeHelpers.GetSkipped(rootDir', pattern', modeToken', embeddedKey') @@>)
             getSkipped.AddXmlDoc
                 "Returns files that don't have parseable front matter (no `---` block, \
                  yaml malformed, IO error). Distinct from GetRejected — these files aren't \
@@ -298,13 +325,15 @@ type FrontMatterTypeProvider(config: TypeProviderConfig) as this =
 
             // Describe() — schema visualisation as F# record source.
             // Use the mode-aware formatter so the printed record matches what
-            // this TP actually generated (Name/Description typed in skill mode,
-            // ordinary `string option` in general mode).
-            let schemaText = formatSchemaForMode isSkillMode report
+            // this TP actually generated.
+            let schemaText = formatSchemaForModeWithExtension modeToken embeddedKeyOpt report extensionReport
             let modeNote =
-                if isSkillMode then
+                match modeToken with
+                | "agent-skill" ->
+                    "// Mode: agent-skill — strict Agent Skills validation with typed Name/Description.\n"
+                | "skill" ->
                     "// Mode: skill — Name and Description are required and typed.\n"
-                else
+                | _ ->
                     "// Mode: general — every field is optional.\n"
             let fullText = modeNote + schemaText
             let describeMethod =

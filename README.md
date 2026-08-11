@@ -33,12 +33,26 @@ metadata:
 ---
 ```
 
-Reference the provider with a static directory path. By default the library treats the collection as a **generic** YAML front-matter directory — every field is optional. Pass `Mode = "skill"` to enforce the SKILL.md convention (`name` and `description` must be non-empty strings, exposed as typed `SkillName` / `SkillDescription`):
+Reference the provider with a static directory path. By default the library treats the collection as a **generic** YAML front-matter directory — every field is optional. Pass `Mode = "agent-skill"` to enforce strict Agent Skills validation and project embedded metadata, or `Mode = "skill"` for relaxed validation:
 
 ```fsharp
 open YamlFrontMatter
 
-// SKILL.md collection — name and description are required
+// Strict Agent Skills specification with embedded metadata projection:
+type AgentSkills =
+    FrontMatterProvider<
+        RootDirectory = "/path/to/skills",
+        Pattern = "SKILL.md",
+        Mode = "agent-skill",
+        EmbeddedMetadataKey = "dev.v-san.skills">
+
+for s in AgentSkills.GetAll() do
+    printfn "%s — %s" s.Name.Value s.Description.Value
+    match s.ExtensionMetadata with
+    | Some ext -> printfn "  origin: %A, version: %A" ext.Origin ext.Version
+    | None -> ()
+
+// Relaxed SKILL.md collection — name and description are required non-empty strings
 type Skills = FrontMatterProvider<"/path/to/skills", Mode = "skill">
 for s in Skills.GetAll() do
     printfn "%s — %s" s.Name.Value s.Description.Value
@@ -51,11 +65,19 @@ for p in Posts.GetAll() do
 
 The provider scans the directory at **compile time**, infers a cross-file schema, and generates:
 
-- `FrontMatterDefinition` — an erased type with typed properties for every discovered YAML key. In `skill` mode, `Name` and `Description` are non-optional and typed as `SkillName` / `SkillDescription`.
+- `FrontMatterDefinition` — an erased type with typed properties for every discovered YAML key. In `agent-skill` and `skill` modes, `Name` and `Description` are non-optional and typed as `SkillName` / `SkillDescription`. In `agent-skill` mode with `EmbeddedMetadataKey` configured, `ExtensionMetadata` provides strongly-typed projection of the embedded YAML block.
 - `GetAll()` — returns `seq<FrontMatterDefinition>` for files that pass schema validation.
-- `GetRejected()` — files that have front matter but failed the schema (missing required field, wrong type, empty string) along with the precise per-field failure list.
+- `GetRejected()` — files that have front matter but failed the schema (missing required field, wrong type, empty string, invalid format, unknown field, invalid embedded YAML) along with the precise per-field failure list.
 - `GetSkipped()` — files that aren't front-matter documents at all (no `---` block, malformed YAML, IO error).
 - `Describe()` — returns the inferred schema as an F# record declaration. Useful for code generation, documentation, and quick auditing.
+
+## Validation Modes
+
+| Mode | Use Case | Validation Rules |
+|---|---|---|
+| `"agent-skill"` | Standard Agent Skills (`SKILL.md`) | Strict validation against the official Agent Skills specification. Only `name`, `description`, `license`, `compatibility`, `metadata`, and `allowed-tools` permitted. Enforces lowercase kebab-case `name` (1–64 chars), directory name equality, `description` (1–1024 chars), `compatibility` (1–500 chars), and string-only `metadata` map. Supports `EmbeddedMetadataKey`. |
+| `"skill"` | Legacy / Loose Skills | Requires non-empty `name` and `description`, but allows arbitrary top-level fields (e.g. `tags`, `priority`, `active`) without naming or length constraints. |
+| `"general"` *(default)* | Generic Front Matter | Permissive mode for blog posts, documentation, ADRs, recipes. Every field is optional. |
 
 ### Use the Core library directly
 
@@ -217,12 +239,12 @@ All design-time dependencies (VYaml, etc.) are bundled alongside the design-time
 
 ### Static parameters
 
-
-| Parameter       | Type     | Default      | Description                            |
-| --------------- | -------- | ------------ | -------------------------------------- |
-| `RootDirectory` | `string` | *(required)* | Absolute path to the directory to scan |
-| `Pattern`       | `string` | `"SKILL.md"` | File name glob pattern                 |
-
+| Parameter             | Type     | Default      | Description                                                                                     |
+| --------------------- | -------- | ------------ | ----------------------------------------------------------------------------------------------- |
+| `RootDirectory`       | `string` | *(required)* | Absolute path to the directory to scan                                                          |
+| `Pattern`             | `string` | `"SKILL.md"` | File name glob pattern                                                                          |
+| `Mode`                | `string` | `"general"`  | Validation mode: `"agent-skill"`, `"skill"`, or `"general"`                                     |
+| `EmbeddedMetadataKey` | `string` | `""`         | Metadata key containing embedded YAML mapping to project into `ExtensionMetadata` (agent-skill) |
 
 ## Project structure
 
@@ -242,7 +264,6 @@ examples/
 
 ## Supported YAML types
 
-
 | YAML value       | Inferred F# type      | Property type        |
 | ---------------- | --------------------- | -------------------- |
 | `true` / `false` | `bool`                | `bool option`        |
@@ -252,8 +273,7 @@ examples/
 | `[a, b, c]`      | `string list`         | `string list option` |
 | nested mapping   | generated record type | `XxxData option`     |
 
-
-The `Name` and `Description` fields are treated as **required** and exposed as `SkillName` / `SkillDescription` (single-case DU wrappers), not options.
+In `agent-skill` and `skill` modes, `Name` and `Description` are validated and exposed as typed `SkillName` / `SkillDescription`. In `agent-skill` mode with `EmbeddedMetadataKey`, the embedded mapping is projected into `ExtensionMetadata : ExtensionMetadataData option`.
 
 ## CLI tool
 
@@ -266,18 +286,18 @@ dotnet tool install -g dotnet-yamlfm
 Then use:
 
 ```shell
-# Dump every SKILL.md's parsed metadata (parallel streaming)
-yamlfm /path/to/skills
+# Dump parsed metadata with validation
+yamlfm /path/to/skills --mode agent-skill --embedded-key dev.v-san.skills
 
-# Print the inferred F# record type
-yamlfm /path/to/skills --schema
+# Print the inferred F# record schema
+yamlfm /path/to/skills --schema --mode agent-skill --embedded-key dev.v-san.skills
 ```
 
 Or run from source:
 
 ```shell
-dotnet run --project src/dotnet-yamlfm -- /path/to/skills
-dotnet run --project src/dotnet-yamlfm -- /path/to/skills --schema
+dotnet run --project src/dotnet-yamlfm -- /path/to/skills --mode agent-skill --embedded-key dev.v-san.skills
+dotnet run --project src/dotnet-yamlfm -- /path/to/skills --schema --mode agent-skill --embedded-key dev.v-san.skills
 ```
 
 ## Building

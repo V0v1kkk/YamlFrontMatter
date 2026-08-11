@@ -63,24 +63,41 @@ type RuntimeHelpers private () =
         | Some (YMap m) -> Some m
         | _             -> None
 
+    static member TryGetExtensionMetadata(embeddedKey: YamlKey, fields: Map<YamlKey, YamlValue>) =
+        match Map.tryFind (YamlKey "metadata") fields with
+        | Some (YMap meta) ->
+            match Map.tryFind embeddedKey meta with
+            | Some (YString yamlText) ->
+                match SchemaInference.parseEmbeddedYaml None embeddedKey yamlText with
+                | Ok embeddedMap -> Some embeddedMap
+                | Error _ -> None
+            | _ -> None
+        | _ -> None
+
     // -----------------------------------------------------------------------
     // Mode → schema reconstruction
     //
-    // The TP encodes its `Mode` static parameter as a string ("skill" or
-    // "general") because TP static params can only be primitive types. The
-    // runtime-side `RuntimeHelpers` reconstructs the corresponding
-    // FrontMatterSchema before each scan.
+    // The TP encodes its `Mode` static parameter as a string ("skill",
+    // "agent-skill", or "general") because TP static params can only be
+    // primitive types. The runtime-side `RuntimeHelpers` reconstructs the
+    // corresponding FrontMatterSchema before each scan.
     //
     // Custom `Required [...]` schemas can't currently be expressed via TP
     // static params; users wanting that should call `FrontMatterReader.tryRead`
     // / `Scanner.scan` directly.
     // -----------------------------------------------------------------------
 
+    static member private SchemaForMode(mode: string, embeddedKey: string) : FrontMatterSchema =
+        let m = if isNull mode then "general" else mode.Trim().ToLowerInvariant()
+        let k = if System.String.IsNullOrWhiteSpace embeddedKey then None else Some (embeddedKey.Trim())
+        match m with
+        | "agent-skill" | "agentskill" -> AgentSkill k
+        | "skill"                      -> Skill
+        | "general"                    -> General
+        | _                            -> General
+
     static member private SchemaForMode(mode: string) : FrontMatterSchema =
-        match (if isNull mode then "general" else mode.Trim().ToLowerInvariant()) with
-        | "skill"   -> Skill
-        | "general" -> General
-        | _         -> General   // forward-compat: unknown mode → permissive
+        RuntimeHelpers.SchemaForMode(mode, "")
 
     static member private DefaultScanOptions(rootDir: string, pattern: string) : ScanOptions =
         { RootDirectory       = AbsoluteFilePath.createUnsafe rootDir
@@ -97,10 +114,10 @@ type RuntimeHelpers private () =
     // can add a cache later). The seqs are lazy — caller can break early.
     // -----------------------------------------------------------------------
 
-    static member GetAll(rootDir: string, pattern: string, mode: string) : RawFrontMatter seq =
+    static member GetAll(rootDir: string, pattern: string, mode: string, embeddedKey: string) : RawFrontMatter seq =
         seq {
             let ct     = CancellationToken.None
-            let schema = RuntimeHelpers.SchemaForMode mode
+            let schema = RuntimeHelpers.SchemaForMode(mode, embeddedKey)
             let opts   = RuntimeHelpers.DefaultScanOptions(rootDir, pattern)
             for item in scanAll schema opts ct do
                 match item with
@@ -108,10 +125,13 @@ type RuntimeHelpers private () =
                 | _ -> ()
         }
 
-    static member GetRejected(rootDir: string, pattern: string, mode: string) : FrontMatterRejection seq =
+    static member GetAll(rootDir: string, pattern: string, mode: string) : RawFrontMatter seq =
+        RuntimeHelpers.GetAll(rootDir, pattern, mode, "")
+
+    static member GetRejected(rootDir: string, pattern: string, mode: string, embeddedKey: string) : FrontMatterRejection seq =
         seq {
             let ct     = CancellationToken.None
-            let schema = RuntimeHelpers.SchemaForMode mode
+            let schema = RuntimeHelpers.SchemaForMode(mode, embeddedKey)
             let opts   = RuntimeHelpers.DefaultScanOptions(rootDir, pattern)
             for item in scanAll schema opts ct do
                 match item with
@@ -120,10 +140,13 @@ type RuntimeHelpers private () =
                 | _ -> ()
         }
 
-    static member GetSkipped(rootDir: string, pattern: string, mode: string) : FrontMatterSkip seq =
+    static member GetRejected(rootDir: string, pattern: string, mode: string) : FrontMatterRejection seq =
+        RuntimeHelpers.GetRejected(rootDir, pattern, mode, "")
+
+    static member GetSkipped(rootDir: string, pattern: string, mode: string, embeddedKey: string) : FrontMatterSkip seq =
         seq {
             let ct     = CancellationToken.None
-            let schema = RuntimeHelpers.SchemaForMode mode
+            let schema = RuntimeHelpers.SchemaForMode(mode, embeddedKey)
             let opts   = RuntimeHelpers.DefaultScanOptions(rootDir, pattern)
             for item in scanAll schema opts ct do
                 match item with
@@ -131,3 +154,6 @@ type RuntimeHelpers private () =
                     yield { Path = path; Reason = reason }
                 | _ -> ()
         }
+
+    static member GetSkipped(rootDir: string, pattern: string, mode: string) : FrontMatterSkip seq =
+        RuntimeHelpers.GetSkipped(rootDir, pattern, mode, "")

@@ -87,7 +87,7 @@ let rec mergeTypes (a: InferredType) (b: InferredType) : InferredType =
 // ---------------------------------------------------------------------------
 
 let toPascalCase (s: string) : string =
-    s.Split([| '-'; '_'; ' ' |], StringSplitOptions.RemoveEmptyEntries)
+    s.Split([| '-'; '_'; ' '; '.' |], StringSplitOptions.RemoveEmptyEntries)
     |> Array.map (fun w ->
         if w.Length = 0 then w
         else string (Char.ToUpperInvariant w.[0]) + w.[1..])
@@ -185,6 +185,70 @@ let inferSchemaWithStats (fileMaps: Map<YamlKey, obj> list) : DiscoveryReport =
 let inferSchema (fileMaps: Map<YamlKey, obj> list) : DiscoveredSchema =
     (inferSchemaWithStats fileMaps).Schema
 
+let private toYamlDictEntries (dict: IDictionary) : (YamlKey * obj) list =
+    [ for entry in dict ->
+        match entry with
+        | :? DictionaryEntry as de -> toYamlKey de.Key, de.Value
+        | :? KeyValuePair<obj, obj> as kvp -> toYamlKey kvp.Key, kvp.Value
+        | _ -> YamlKey "", null ]
+
+/// Parse an embedded YAML string under a metadata key into Map<YamlKey, YamlValue>.
+/// Used by both design-time schema discovery and runtime property access.
+/// Returns actionable errors with outer path, metadata key, line/col where available.
+let parseEmbeddedYaml (path: AbsoluteFilePath option) (key: YamlKey) (yamlText: string) : Result<Map<YamlKey, YamlValue>, string> =
+    let pathInfo = match path with Some p -> sprintf " in '%s'" (AbsoluteFilePath.value p) | None -> ""
+    let (YamlKey keyStr) = key
+    if String.IsNullOrWhiteSpace yamlText then
+        Error (sprintf "Embedded YAML content for key '%s'%s is empty or whitespace-only" keyStr pathInfo)
+    else
+        try
+            let bytes = Encoding.UTF8.GetBytes yamlText
+            let memory = ReadOnlyMemory<byte>(bytes)
+            match YamlSerializer.Deserialize<obj>(memory) with
+            | :? IDictionary as dict ->
+                let entries =
+                    dict
+                    |> toYamlDictEntries
+                    |> List.map (fun (k, v) -> k, objToValue v)
+                    |> Map.ofList
+                Ok entries
+            | null ->
+                Error (sprintf "Embedded YAML content for key '%s'%s evaluated to null" keyStr pathInfo)
+            | other ->
+                Error (sprintf "Embedded YAML root for key '%s'%s must be a mapping, but got %s" keyStr pathInfo (other.GetType().Name))
+        with
+        | :? VYaml.Parser.YamlParserException as ex ->
+            Error (sprintf "Embedded YAML parse error for key '%s'%s: %s" keyStr pathInfo ex.Message)
+        | ex ->
+            Error (sprintf "Embedded YAML error for key '%s'%s: %s" keyStr pathInfo ex.Message)
+
+/// Parse an embedded YAML string under a metadata key into Map<YamlKey, obj> for schema inference.
+let parseEmbeddedYamlObj (path: AbsoluteFilePath option) (key: YamlKey) (yamlText: string) : Result<Map<YamlKey, obj>, string> =
+    let pathInfo = match path with Some p -> sprintf " in '%s'" (AbsoluteFilePath.value p) | None -> ""
+    let (YamlKey keyStr) = key
+    if String.IsNullOrWhiteSpace yamlText then
+        Error (sprintf "Embedded YAML content for key '%s'%s is empty or whitespace-only" keyStr pathInfo)
+    else
+        try
+            let bytes = Encoding.UTF8.GetBytes yamlText
+            let memory = ReadOnlyMemory<byte>(bytes)
+            match YamlSerializer.Deserialize<obj>(memory) with
+            | :? IDictionary as dict ->
+                let entries =
+                    dict
+                    |> toYamlDictEntries
+                    |> Map.ofList
+                Ok entries
+            | null ->
+                Error (sprintf "Embedded YAML content for key '%s'%s evaluated to null" keyStr pathInfo)
+            | other ->
+                Error (sprintf "Embedded YAML root for key '%s'%s must be a mapping, but got %s" keyStr pathInfo (other.GetType().Name))
+        with
+        | :? VYaml.Parser.YamlParserException as ex ->
+            Error (sprintf "Embedded YAML parse error for key '%s'%s: %s" keyStr pathInfo ex.Message)
+        | ex ->
+            Error (sprintf "Embedded YAML error for key '%s'%s: %s" keyStr pathInfo ex.Message)
+
 // ---------------------------------------------------------------------------
 // Front matter parsing (sync, for design-time use)
 // ---------------------------------------------------------------------------
@@ -202,9 +266,8 @@ let parseYamlText (yamlText: string) : Map<YamlKey, obj> =
         let memory = ReadOnlyMemory<byte>(bytes)
         match YamlSerializer.Deserialize<obj>(memory) with
         | :? IDictionary as dict ->
-            [ for entry in dict ->
-                let entry = entry :?> DictionaryEntry
-                toYamlKey entry.Key, entry.Value ]
+            dict
+            |> toYamlDictEntries
             |> Map.ofList
         | _ -> Map.empty
 
@@ -242,6 +305,48 @@ let discoverSchemaWithStats (rootDir: string) (pattern: string) : DiscoveryRepor
         |> Seq.toList
     inferSchemaWithStats fileMaps
 
+/// Scan a directory synchronously, infer the schema and per-field statistics
+/// from all matching files, plus the extension schema for a configured embedded metadata key.
+let discoverSchemaWithStatsAndExtension (rootDir: string) (pattern: string) (embeddedKey: string option) : DiscoveryReport * DiscoveryReport option =
+    let files =
+        if Directory.Exists rootDir then
+            Directory.EnumerateFiles(rootDir, pattern, SearchOption.AllDirectories)
+            |> Seq.toList
+        else []
+
+    let outerMaps = ResizeArray<Map<YamlKey, obj>>()
+    let embeddedMaps = ResizeArray<Map<YamlKey, obj>>()
+
+    for path in files do
+        match tryParseRawFrontMatter path with
+        | Ok (Some m) ->
+            outerMaps.Add m
+            match embeddedKey with
+            | Some keyStr when not (String.IsNullOrWhiteSpace keyStr) ->
+                let yamlKey = YamlKey keyStr
+                match Map.tryFind (YamlKey "metadata") m with
+                | Some (:? IDictionary as metaDict) ->
+                    let entries = toYamlDictEntries metaDict
+                    match entries |> List.tryFind (fun (k, _) -> k = yamlKey) with
+                    | Some (_, (:? string as s)) ->
+                        let fp = AbsoluteFilePath.createUnsafe path
+                        match parseEmbeddedYamlObj (Some fp) yamlKey s with
+                        | Ok em -> embeddedMaps.Add em
+                        | Error _ -> ()
+                    | _ -> ()
+                | _ -> ()
+            | _ -> ()
+        | _ -> ()
+
+    let outerReport = inferSchemaWithStats (Seq.toList outerMaps)
+    let extensionReport =
+        match embeddedKey with
+        | Some keyStr when not (String.IsNullOrWhiteSpace keyStr) ->
+            Some (inferSchemaWithStats (Seq.toList embeddedMaps))
+        | _ -> None
+
+    outerReport, extensionReport
+
 /// Scan a directory synchronously, infer the schema from all matching files.
 /// Errors are silently skipped (design-time: we want schema even if a few files are broken).
 let discoverSchema (rootDir: string) (pattern: string) : DiscoveredSchema =
@@ -271,8 +376,10 @@ let discoverSchema (rootDir: string) (pattern: string) : DiscoveredSchema =
 /// Padding is computed dynamically from the longest property name in the
 /// record so long names like `RequiresEnvironmentVariables` don't break
 /// alignment.
-let private formatSchemaCore (isSkillMode: bool) (report: DiscoveryReport) : string =
+let private formatSchemaCore (mode: string) (embeddedKey: string option) (report: DiscoveryReport) (extensionReport: DiscoveryReport option) : string =
     let sb = StringBuilder()
+    let isSkillMode = mode = "skill"
+    let isAgentSkillMode = mode = "agent-skill"
 
     // Nested TMappings get their own `and`-record. We collect them as we walk
     // and emit them after the root record. `seen` deduplicates by name.
@@ -292,7 +399,8 @@ let private formatSchemaCore (isSkillMode: bool) (report: DiscoveryReport) : str
                 pending.Add(typeName, fields)
             typeName
 
-    let isSkillSpecialKey (YamlKey k) = isSkillMode && (k = "name" || k = "description")
+    let isSkillSpecialKey (YamlKey k) =
+        (isSkillMode || isAgentSkillMode) && (k = "name" || k = "description")
 
     // Compute the padding once per record from the longest property name in
     // that record, so long names (e.g. `RequiresEnvironmentVariables`) don't
@@ -304,6 +412,8 @@ let private formatSchemaCore (isSkillMode: bool) (report: DiscoveryReport) : str
                 if recordHasSkillSpecials then
                     yield "Name".Length
                     yield "Description".Length
+                if isAgentSkillMode && embeddedKey.IsSome then
+                    yield "ExtensionMetadata".Length
                 for (YamlKey rawKey, _) in fields do
                     yield (toPascalCase rawKey).Length
             }
@@ -326,12 +436,15 @@ let private formatSchemaCore (isSkillMode: bool) (report: DiscoveryReport) : str
         |> Seq.sortBy (fun (YamlKey k, _) -> k)
         |> Seq.toList
 
-    let rootPad = computeNamePadding isSkillMode topLevelEntries
+    let rootPad = computeNamePadding (isSkillMode || isAgentSkillMode) topLevelEntries
 
     sb.AppendLine("type SkillDefinition = {") |> ignore
     appendField rootPad "Path" "AbsoluteFilePath" "always (synthesised by the scanner)"
 
-    if isSkillMode then
+    if isAgentSkillMode then
+        appendField rootPad "Name"        "SkillName"        "required (Agent Skills spec: 1-64 chars, a-z/0-9/hyphen, matches parent dir)"
+        appendField rootPad "Description" "SkillDescription" "required (Agent Skills spec: 1-1024 chars)"
+    elif isSkillMode then
         appendField rootPad "Name"        "SkillName"        "required (SKILL.md convention)"
         appendField rootPad "Description" "SkillDescription" "required (SKILL.md convention)"
 
@@ -343,6 +456,16 @@ let private formatSchemaCore (isSkillMode: bool) (report: DiscoveryReport) : str
         let count    = Map.tryFind yamlKey report.FieldOccurrences |> Option.defaultValue 0
         let annotation = sprintf "present in %d/%d files" count report.FilesScanned
         appendField rootPad propName typeStr annotation
+
+    match extensionReport, embeddedKey with
+    | Some extRep, Some keyStr when not (String.IsNullOrWhiteSpace keyStr) ->
+        let extTypeName = "ExtensionMetadataData"
+        if seen.Add extTypeName then
+            pending.Add(extTypeName, extRep.Schema)
+        let extCount = extRep.FilesScanned
+        let extAnnotation = sprintf "projected from metadata.%s (present in %d/%d files)" keyStr extCount report.FilesScanned
+        appendField rootPad "ExtensionMetadata" (extTypeName + " option") extAnnotation
+    | _ -> ()
 
     sb.AppendLine("}") |> ignore
 
@@ -384,10 +507,14 @@ let private formatSchemaCore (isSkillMode: bool) (report: DiscoveryReport) : str
 /// field is optional, no special handling for `name` / `description`. Use
 /// `formatSchemaForMode` if the rendering should match a specific TP Mode.
 let formatSchema (report: DiscoveryReport) : string =
-    formatSchemaCore false report
+    formatSchemaCore "general" None report None
 
 /// Render the discovered schema in the way that matches the supplied schema.
 /// Used by the type provider's `Describe()` so the printed F# record matches
 /// the actual properties the TP generated for that mode.
 let formatSchemaForMode (isSkillMode: bool) (report: DiscoveryReport) : string =
-    formatSchemaCore isSkillMode report
+    formatSchemaCore (if isSkillMode then "skill" else "general") None report None
+
+/// Render the discovered schema with optional extension metadata schema.
+let formatSchemaForModeWithExtension (mode: string) (embeddedKey: string option) (report: DiscoveryReport) (extensionReport: DiscoveryReport option) : string =
+    formatSchemaCore mode embeddedKey report extensionReport
