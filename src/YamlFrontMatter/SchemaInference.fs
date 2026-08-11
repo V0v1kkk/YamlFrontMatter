@@ -306,8 +306,13 @@ let discoverSchemaWithStats (rootDir: string) (pattern: string) : DiscoveryRepor
     inferSchemaWithStats fileMaps
 
 /// Scan a directory synchronously, infer the schema and per-field statistics
-/// from all matching files, plus the extension schema for a configured embedded metadata key.
-let discoverSchemaWithStatsAndExtension (rootDir: string) (pattern: string) (embeddedKey: string option) : DiscoveryReport * DiscoveryReport option =
+/// from matching files that satisfy an optional filter predicate.
+let discoverSchemaWithFilterAndExtension
+    (rootDir: string)
+    (pattern: string)
+    (embeddedKey: string option)
+    (predicate: (AbsoluteFilePath -> Map<YamlKey, obj> -> bool) option)
+    : DiscoveryReport * DiscoveryReport option =
     let files =
         if Directory.Exists rootDir then
             Directory.EnumerateFiles(rootDir, pattern, SearchOption.AllDirectories)
@@ -318,24 +323,30 @@ let discoverSchemaWithStatsAndExtension (rootDir: string) (pattern: string) (emb
     let embeddedMaps = ResizeArray<Map<YamlKey, obj>>()
 
     for path in files do
+        let fp = AbsoluteFilePath.createUnsafe path
         match tryParseRawFrontMatter path with
         | Ok (Some m) ->
-            outerMaps.Add m
-            match embeddedKey with
-            | Some keyStr when not (String.IsNullOrWhiteSpace keyStr) ->
-                let yamlKey = YamlKey keyStr
-                match Map.tryFind (YamlKey "metadata") m with
-                | Some (:? IDictionary as metaDict) ->
-                    let entries = toYamlDictEntries metaDict
-                    match entries |> List.tryFind (fun (k, _) -> k = yamlKey) with
-                    | Some (_, (:? string as s)) ->
-                        let fp = AbsoluteFilePath.createUnsafe path
-                        match parseEmbeddedYamlObj (Some fp) yamlKey s with
-                        | Ok em -> embeddedMaps.Add em
-                        | Error _ -> ()
+            let isAccepted =
+                match predicate with
+                | Some pred -> pred fp m
+                | None -> true
+
+            if isAccepted then
+                outerMaps.Add m
+                match embeddedKey with
+                | Some keyStr when not (String.IsNullOrWhiteSpace keyStr) ->
+                    let yamlKey = YamlKey keyStr
+                    match Map.tryFind (YamlKey "metadata") m with
+                    | Some (:? IDictionary as metaDict) ->
+                        let entries = toYamlDictEntries metaDict
+                        match entries |> List.tryFind (fun (k, _) -> k = yamlKey) with
+                        | Some (_, (:? string as s)) ->
+                            match parseEmbeddedYamlObj (Some fp) yamlKey s with
+                            | Ok em -> embeddedMaps.Add em
+                            | Error _ -> ()
+                        | _ -> ()
                     | _ -> ()
                 | _ -> ()
-            | _ -> ()
         | _ -> ()
 
     let outerReport = inferSchemaWithStats (Seq.toList outerMaps)
@@ -346,6 +357,11 @@ let discoverSchemaWithStatsAndExtension (rootDir: string) (pattern: string) (emb
         | _ -> None
 
     outerReport, extensionReport
+
+/// Scan a directory synchronously, infer the schema and per-field statistics
+/// from all matching files, plus the extension schema for a configured embedded metadata key.
+let discoverSchemaWithStatsAndExtension (rootDir: string) (pattern: string) (embeddedKey: string option) : DiscoveryReport * DiscoveryReport option =
+    discoverSchemaWithFilterAndExtension rootDir pattern embeddedKey None
 
 /// Scan a directory synchronously, infer the schema from all matching files.
 /// Errors are silently skipped (design-time: we want schema even if a few files are broken).

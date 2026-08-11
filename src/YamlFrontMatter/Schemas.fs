@@ -351,3 +351,39 @@ let allowEmpty (key: string) (schema: FrontMatterSchema) : FrontMatterSchema =
         |> List.map (fun r ->
             if r.Key = yamlKey && r.Type = TString then { r with NonEmpty = false }
             else r))
+
+// ---------------------------------------------------------------------------
+// Validation-aware discovery
+// ---------------------------------------------------------------------------
+
+/// Synchronously discover the schema and optional extension schema across a directory,
+/// filtering strictly for files that satisfy the given FrontMatterSchema validation rules.
+/// Files that fail validation are excluded so rejected samples do not pollute Describe()
+/// or the generated FrontMatterDefinition type.
+let discoverValidatedSchemaWithStatsAndExtension
+    (schema: FrontMatterSchema)
+    (rootDir: string)
+    (pattern: string)
+    : DiscoveryReport * DiscoveryReport option =
+    let embeddedKey =
+        match schema with
+        | AgentSkill (Some k) -> Some k
+        | _ -> None
+
+    let predicate (path: AbsoluteFilePath) (rawMap: Map<YamlKey, obj>) : bool =
+        match schema with
+        | General -> true
+        | _ ->
+            let typedFields = rawMap |> Map.map (fun _ v -> objToValue v)
+            let raw = { Path = path; Fields = typedFields }
+            match validate schema raw with
+            | Ok _ -> true
+            | Error _ -> false
+
+    discoverSchemaWithFilterAndExtension rootDir pattern embeddedKey (Some predicate)
+
+/// Synchronously discover the schema across a directory, filtering for files that satisfy
+/// the given FrontMatterSchema validation rules.
+let discoverValidatedSchema (schema: FrontMatterSchema) (rootDir: string) (pattern: string) : DiscoveredSchema =
+    let report, _ = discoverValidatedSchemaWithStatsAndExtension schema rootDir pattern
+    report.Schema

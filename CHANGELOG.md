@@ -25,3 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Formatted failure diagnostics for CI and automated verification with exit code 2 on validation errors.
 - **Documentation**:
   - Added detailed comparison table of validation modes (`"agent-skill"`, `"skill"`, `"general"`) to [README.md](README.md).
+
+### Fixed
+- **FSharp.Core Dependency Versioning**:
+  - Pinned `FSharp.Core` package reference version to `10.*` in `Directory.Build.props` to prevent `NU1605` package downgrade warnings on .NET 10.0.10x installations and `dotnet fsi`.
+- **Validation-Aware Schema Discovery**:
+  - `Describe()`, `--schema`, and `FrontMatterDefinition` now filter out documents failing schema validation so rejected samples (e.g. unexpected fields or malformed embedded YAML) do not pollute the generated schema.

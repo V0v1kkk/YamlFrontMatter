@@ -191,3 +191,12 @@ let ``Invalid fixtures are all rejected with expected failure types`` () =
     // 10. Description too long
     let r10 = rejectionFor "desc-too-long"
     Assert.Contains(r10.Failures, function InvalidFormat (YamlKey "description", d) when d.Contains("outside allowed range 1-1024") -> true | _ -> false)
+
+[<Fact>]
+let ``AgentSkill discovery on invalid fixtures directory does not include invalid fields in schema`` () =
+    let rootDir = Path.Combine(__SOURCE_DIRECTORY__, "InvalidAgentSkillFixtures")
+    let report, extReport = Schemas.discoverValidatedSchemaWithStatsAndExtension (AgentSkill (Some "dev.v-san.skills")) rootDir "SKILL.md"
+    Assert.Equal(0, report.FilesScanned)
+    Assert.False(report.Schema.ContainsKey(YamlKey "custom-property"))
+    Assert.True(extReport.IsSome)
+    Assert.Equal(0, extReport.Value.FilesScanned)

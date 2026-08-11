@@ -125,7 +125,12 @@ let private dumpMetadata (rootDir: string) (schema: FrontMatterSchema) (pattern:
 /// Schema-discovery mode: synchronously walk the directory, infer the union
 /// schema across all files, and print it as F# record source.
 let private dumpSchema (rootDir: string) (pattern: string) (mode: string) (embeddedKey: string option) : int =
-    let report, extensionReport = discoverSchemaWithStatsAndExtension rootDir pattern embeddedKey
+    let schema =
+        match mode.Trim().ToLowerInvariant() with
+        | "agent-skill" -> AgentSkill embeddedKey
+        | "skill" -> Skill
+        | _ -> General
+    let report, extensionReport = discoverValidatedSchemaWithStatsAndExtension schema rootDir pattern
     printfn "%s" (formatSchemaForModeWithExtension mode embeddedKey report extensionReport)
     0
 

@@ -10,4 +10,8 @@
     <Copyright>Copyright (c) 2026 Vladimir Rogozhin</Copyright>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Update="FSharp.Core" Version="10.*" />
+  </ItemGroup>
+
 </Project>

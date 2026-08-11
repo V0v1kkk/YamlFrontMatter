@@ -87,8 +87,10 @@ let rec objToValue (node: obj) : YamlValue =
     | :? IDictionary as dict ->
         let entries =
             [ for entry in dict ->
-                let entry = entry :?> DictionaryEntry
-                toYamlKey entry.Key, objToValue entry.Value ]
+                match entry with
+                | :? DictionaryEntry as de -> toYamlKey de.Key, objToValue de.Value
+                | :? System.Collections.Generic.KeyValuePair<obj, obj> as kvp -> toYamlKey kvp.Key, objToValue kvp.Value
+                | other -> toYamlKey other, YString "" ]
             |> Map.ofList
         YMap entries
     | :? IList as list ->

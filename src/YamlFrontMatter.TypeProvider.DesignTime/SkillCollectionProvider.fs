@@ -263,12 +263,17 @@ type FrontMatterTypeProvider(config: TypeProviderConfig) as this =
             let embeddedKeyRaw = if args.Length > 3 then args.[3] :?> string else ""
             let embeddedKey = if isNull embeddedKeyRaw then "" else embeddedKeyRaw.Trim()
 
-            let _schema, modeToken = parseMode modeRaw
+            let _, modeToken = parseMode modeRaw
             let embeddedKeyOpt = if String.IsNullOrWhiteSpace embeddedKey then None else Some embeddedKey
+            let schema =
+                match modeToken with
+                | "agent-skill" -> Schemas.AgentSkill embeddedKeyOpt
+                | "skill" -> Schemas.Skill
+                | _ -> Schemas.General
 
             let report, extensionReport =
                 if Directory.Exists rootDir then
-                    discoverSchemaWithStatsAndExtension rootDir pattern embeddedKeyOpt
+                    Schemas.discoverValidatedSchemaWithStatsAndExtension schema rootDir pattern
                 else
                     { Schema = Map.empty; FilesScanned = 0; FieldOccurrences = Map.empty }, None
 
